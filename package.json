@@ -1,0 +1,41 @@
+{
+  "name": "opportunity-content-engine",
+  "version": "1.0.0",
+  "description": "Automated pipeline that discovers student opportunities from YouTube, extracts data with Gemini, generates Instagram content, and stores in Google Sheets",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "pipeline:run": "tsx src/index.ts",
+    "pipeline:dry-run": "DRY_RUN=true tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "youtube",
+    "gemini",
+    "instagram",
+    "opportunities",
+    "automation",
+    "content-engine"
+  ],
+  "author": "Karthik Suthari",
+  "license": "MIT",
+  "dependencies": {
+    "@google/genai": "^2.8.0",
+    "dotenv": "^16.4.7",
+    "google-auth-library": "^9.15.1",
+    "google-spreadsheet": "^5.3.0",
+    "rss-parser": "^3.13.0",
+    "uuid": "^11.1.0",
+    "winston": "^3.17.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
