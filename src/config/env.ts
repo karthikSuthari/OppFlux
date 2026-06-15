@@ -41,9 +41,16 @@ function loadConfig(): AppConfig {
     googlePrivateKey: requireEnv('GOOGLE_PRIVATE_KEY'),
     imageOutputDir: optionalEnv('IMAGE_OUTPUT_DIR', './images'),
     logLevel: optionalEnv('LOG_LEVEL', 'info'),
-    pollIntervalMinutes: parseInt(optionalEnv('POLL_INTERVAL_MINUTES', '30'), 10),
+    pollIntervalMinutes: parseInt(optionalEnv('POLL_INTERVAL_MINUTES', '60'), 10),
     dryRun: optionalEnv('DRY_RUN', 'false').toLowerCase() === 'true',
     geminiRateLimitMs: parseInt(optionalEnv('GEMINI_RATE_LIMIT_MS', '1500'), 10),
+    // Telegram
+    telegramBotToken: requireEnv('TELEGRAM_BOT_TOKEN'),
+    telegramChatId: requireEnv('TELEGRAM_CHAT_ID'),
+    // Webhook
+    webhookUrl: optionalEnv('WEBHOOK_URL', ''),
+    webhookPort: parseInt(optionalEnv('WEBHOOK_PORT', '3000'), 10),
+    webhookSecret: optionalEnv('WEBHOOK_SECRET', 'content-engine-webhook-secret'),
   };
 
   if (missing.length > 0) {

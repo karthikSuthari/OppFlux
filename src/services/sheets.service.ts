@@ -29,7 +29,8 @@ const HEADERS = {
   ],
   [TABS.CONTENT]: [
     'opportunity_id', 'caption', 'hashtags', 'image_prompt',
-    'image_url', 'content_status',
+    'image_url', 'content_status', 'telegram_message_id',
+    'review_status', 'reviewed_at', 'reviewed_by',
   ],
   [TABS.POSTED]: ['opportunity_id', 'instagram_post_url', 'posted_at'],
 } as const;
@@ -142,6 +143,14 @@ export async function getExistingOpportunities(): Promise<Opportunity[]> {
 }
 
 /**
+ * Get a single opportunity by ID
+ */
+export async function getOpportunityById(opportunityId: string): Promise<Opportunity | null> {
+  const opportunities = await getExistingOpportunities();
+  return opportunities.find((opp) => opp.id === opportunityId) || null;
+}
+
+/**
  * Add a new opportunity to the Opportunities tab
  */
 export async function addOpportunity(opportunity: Opportunity): Promise<void> {
@@ -171,7 +180,7 @@ export async function addOpportunity(opportunity: Opportunity): Promise<void> {
 }
 
 /**
- * Add content for an opportunity to the Content tab
+ * Add content for an opportunity to the Content tab (with review fields)
  */
 export async function addContent(content: Content): Promise<void> {
   if (!doc) throw new Error('Sheets not initialized');
@@ -187,6 +196,10 @@ export async function addContent(content: Content): Promise<void> {
       image_prompt: content.image_prompt,
       image_url: content.image_url,
       content_status: content.content_status,
+      telegram_message_id: content.telegram_message_id || '',
+      review_status: content.review_status || 'pending',
+      reviewed_at: content.reviewed_at || '',
+      reviewed_by: content.reviewed_by || '',
     }),
     { operationName: 'sheets.addContent' }
   );
@@ -215,6 +228,142 @@ export async function updateOpportunityStatus(
     log.debug(`Updated opportunity ${opportunityId} status to "${status}"`);
   } else {
     log.warn(`Opportunity ${opportunityId} not found for status update`);
+  }
+}
+
+// ═══════════════════════════════════════════
+// Content Review Methods (Telegram integration)
+// ═══════════════════════════════════════════
+
+/**
+ * Get content row by opportunity_id
+ */
+export async function getContentByOpportunityId(opportunityId: string): Promise<Content | null> {
+  if (!doc) throw new Error('Sheets not initialized');
+
+  const sheet = doc.sheetsByTitle[TABS.CONTENT];
+  if (!sheet) throw new Error(`Tab "${TABS.CONTENT}" not found`);
+
+  const rows = await sheet.getRows();
+  const row = rows.find((r: GoogleSpreadsheetRow) => r.get('opportunity_id') === opportunityId);
+
+  if (!row) return null;
+
+  return {
+    opportunity_id: row.get('opportunity_id') || '',
+    caption: row.get('caption') || '',
+    hashtags: row.get('hashtags') || '',
+    image_prompt: row.get('image_prompt') || '',
+    image_url: row.get('image_url') || '',
+    content_status: row.get('content_status') || 'draft',
+    telegram_message_id: row.get('telegram_message_id') || '',
+    review_status: row.get('review_status') || '',
+    reviewed_at: row.get('reviewed_at') || '',
+    reviewed_by: row.get('reviewed_by') || '',
+  };
+}
+
+/**
+ * Update content review fields (status, timestamp, reviewer)
+ */
+export async function updateContentReview(
+  opportunityId: string,
+  fields: {
+    review_status: string;
+    reviewed_at: string;
+    reviewed_by: string;
+    content_status: string;
+  }
+): Promise<void> {
+  if (!doc) throw new Error('Sheets not initialized');
+
+  const sheet = doc.sheetsByTitle[TABS.CONTENT];
+  if (!sheet) throw new Error(`Tab "${TABS.CONTENT}" not found`);
+
+  const rows = await sheet.getRows();
+  const row = rows.find((r: GoogleSpreadsheetRow) => r.get('opportunity_id') === opportunityId);
+
+  if (row) {
+    row.set('review_status', fields.review_status);
+    row.set('reviewed_at', fields.reviewed_at);
+    row.set('reviewed_by', fields.reviewed_by);
+    row.set('content_status', fields.content_status);
+    await row.save();
+    log.info(`Updated review for ${opportunityId}: ${fields.review_status}`);
+  } else {
+    log.warn(`Content for ${opportunityId} not found for review update`);
+  }
+}
+
+/**
+ * Update the caption and hashtags for a content row (regeneration)
+ */
+export async function updateContentCaption(
+  opportunityId: string,
+  caption: string,
+  hashtags: string
+): Promise<void> {
+  if (!doc) throw new Error('Sheets not initialized');
+
+  const sheet = doc.sheetsByTitle[TABS.CONTENT];
+  if (!sheet) throw new Error(`Tab "${TABS.CONTENT}" not found`);
+
+  const rows = await sheet.getRows();
+  const row = rows.find((r: GoogleSpreadsheetRow) => r.get('opportunity_id') === opportunityId);
+
+  if (row) {
+    row.set('caption', caption);
+    row.set('hashtags', hashtags);
+    await row.save();
+    log.info(`Updated caption for ${opportunityId}`);
+  } else {
+    log.warn(`Content for ${opportunityId} not found for caption update`);
+  }
+}
+
+/**
+ * Update the image URL for a content row (regeneration)
+ */
+export async function updateContentImage(
+  opportunityId: string,
+  imageUrl: string
+): Promise<void> {
+  if (!doc) throw new Error('Sheets not initialized');
+
+  const sheet = doc.sheetsByTitle[TABS.CONTENT];
+  if (!sheet) throw new Error(`Tab "${TABS.CONTENT}" not found`);
+
+  const rows = await sheet.getRows();
+  const row = rows.find((r: GoogleSpreadsheetRow) => r.get('opportunity_id') === opportunityId);
+
+  if (row) {
+    row.set('image_url', imageUrl);
+    await row.save();
+    log.info(`Updated image URL for ${opportunityId}`);
+  } else {
+    log.warn(`Content for ${opportunityId} not found for image update`);
+  }
+}
+
+/**
+ * Update the Telegram message ID for a content row
+ */
+export async function updateContentTelegramMessageId(
+  opportunityId: string,
+  telegramMessageId: string
+): Promise<void> {
+  if (!doc) throw new Error('Sheets not initialized');
+
+  const sheet = doc.sheetsByTitle[TABS.CONTENT];
+  if (!sheet) throw new Error(`Tab "${TABS.CONTENT}" not found`);
+
+  const rows = await sheet.getRows();
+  const row = rows.find((r: GoogleSpreadsheetRow) => r.get('opportunity_id') === opportunityId);
+
+  if (row) {
+    row.set('telegram_message_id', telegramMessageId);
+    await row.save();
+    log.debug(`Updated telegram_message_id for ${opportunityId}: ${telegramMessageId}`);
   }
 }
 

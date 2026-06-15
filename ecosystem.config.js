@@ -3,22 +3,20 @@
 // ===========================================
 // Run with: pm2 start ecosystem.config.js
 // Monitor: pm2 monit
-// Logs: pm2 logs content-engine
+// Logs: pm2 logs
 
 module.exports = {
   apps: [
+    // ─── Pipeline (Cron Job: every 1 hour) ───
     {
       name: 'content-engine',
       script: 'dist/index.js',
 
-      // Cron-based scheduling: run every 30 minutes
-      cron_restart: '*/30 * * * *',
+      // Cron: run every 1 hour
+      cron_restart: '0 * * * *',
 
       // Don't auto-restart between cron runs
       autorestart: false,
-
-      // Node.js ES modules support
-      node_args: '--experimental-specifier-resolution=node',
 
       // Resource limits
       max_memory_restart: '512M',
@@ -29,9 +27,42 @@ module.exports = {
       },
 
       // Logging
-      log_file: './logs/pm2-combined.log',
-      out_file: './logs/pm2-out.log',
-      error_file: './logs/pm2-error.log',
+      log_file: './logs/pm2-pipeline-combined.log',
+      out_file: './logs/pm2-pipeline-out.log',
+      error_file: './logs/pm2-pipeline-error.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss.SSS',
+      merge_logs: true,
+
+      // Misc
+      watch: false,
+      instances: 1,
+      exec_mode: 'fork',
+    },
+
+    // ─── Webhook Server (Always Running) ───
+    {
+      name: 'content-webhook',
+      script: 'dist/server.js',
+
+      // Always running — restart on crash
+      autorestart: true,
+
+      // Resource limits
+      max_memory_restart: '256M',
+
+      // Restart delay on crash
+      restart_delay: 5000,
+      max_restarts: 10,
+
+      // Environment
+      env: {
+        NODE_ENV: 'production',
+      },
+
+      // Logging
+      log_file: './logs/pm2-webhook-combined.log',
+      out_file: './logs/pm2-webhook-out.log',
+      error_file: './logs/pm2-webhook-error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss.SSS',
       merge_logs: true,
 

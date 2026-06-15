@@ -1,13 +1,15 @@
 {
   "name": "opportunity-content-engine",
-  "version": "1.0.0",
-  "description": "Automated pipeline that discovers student opportunities from YouTube, extracts data with Gemini, generates Instagram content, and stores in Google Sheets",
+  "version": "2.0.0",
+  "description": "Automated pipeline that discovers student opportunities from YouTube, extracts data with Gemini, generates Instagram content, stores in Google Sheets, and sends to Telegram for review",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dev:server": "tsx src/server.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "start:server": "node dist/server.js",
     "pipeline:run": "tsx src/index.ts",
     "pipeline:dry-run": "DRY_RUN=true tsx src/index.ts",
     "typecheck": "tsc --noEmit"
@@ -18,13 +20,15 @@
     "instagram",
     "opportunities",
     "automation",
-    "content-engine"
+    "content-engine",
+    "telegram"
   ],
   "author": "Karthik Suthari",
   "license": "MIT",
   "dependencies": {
     "@google/genai": "^2.8.0",
     "dotenv": "^16.4.7",
+    "express": "^4.21.0",
     "google-auth-library": "^9.15.1",
     "google-spreadsheet": "^5.3.0",
     "rss-parser": "^3.13.0",
@@ -33,6 +37,7 @@
     "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^22.15.0",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.4",

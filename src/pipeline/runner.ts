@@ -7,11 +7,14 @@ import { config } from '../config/env.js';
 import { createServiceLogger } from '../utils/logger.js';
 import { sleep } from '../utils/retry.js';
 import * as sheetsService from '../services/sheets.service.js';
-import { fetchChannelFeed, extractUrls } from '../services/rss.service.js';
+import { fetchChannelFeed } from '../services/rss.service.js';
 import { extractOpportunity } from '../services/gemini-extract.service.js';
 import { generateContent } from '../services/gemini-content.service.js';
 import { generateImage } from '../services/gemini-image.service.js';
+import { generateImageLocal } from '../services/gemini-image.service.js';
+import { uploadImage } from '../services/cloud-storage.service.js';
 import { checkDuplicate } from '../services/duplicate.service.js';
+import { sendReviewMessage } from '../services/telegram.service.js';
 import type {
   PipelineRunSummary,
   Opportunity,
@@ -28,7 +31,7 @@ const log = createServiceLogger('pipeline');
  * 1. Connect to Google Sheets
  * 2. Fetch active channels
  * 3. For each channel, fetch RSS feed
- * 4. For each video, check duplicates → extract → generate content → generate image → save
+ * 4. For each video: duplicate check → extract → generate content → generate image → save → send to Telegram
  * 5. Log summary
  */
 export async function runPipeline(): Promise<PipelineRunSummary> {
@@ -44,6 +47,7 @@ export async function runPipeline(): Promise<PipelineRunSummary> {
     imagesGenerated: 0,
     duplicatesSkipped: 0,
     nonOpportunitiesSkipped: 0,
+    telegramSent: 0,
     errors: 0,
     errorDetails: [],
   };
@@ -133,7 +137,8 @@ async function processChannel(
 }
 
 /**
- * Process a single video through the full pipeline
+ * Process a single video through the full pipeline:
+ * Duplicate check → Extract → Content → Image → Save → Telegram review
  */
 async function processVideo(
   video: VideoEntry,
@@ -212,13 +217,20 @@ async function processVideo(
   }
   summary.contentGenerated++;
 
-  // ── Step F: Generate image via Gemini ──
+  // ── Step F: Generate image via Gemini + upload to cloud ──
   log.info('  🎨 Generating image...');
   await sleep(config.geminiRateLimitMs);
-  const imagePath = await generateImage(contentResult.image_prompt, opportunityId);
 
-  if (imagePath) {
+  // Generate local image first (we need it for Telegram upload)
+  const localImagePath = await generateImageLocal(contentResult.image_prompt, opportunityId);
+  let cloudImageUrl = '';
+
+  if (localImagePath) {
     summary.imagesGenerated++;
+    // Upload to Google Drive cloud storage
+    const fileName = `opp_${opportunityId}_${Date.now()}.png`;
+    cloudImageUrl = await uploadImage(localImagePath, fileName);
+    log.info(`  ☁️ Image uploaded to cloud: ${cloudImageUrl}`);
   }
 
   // ── Step G: Save content to Sheets ──
@@ -228,19 +240,34 @@ async function processVideo(
     caption: contentResult.caption,
     hashtags,
     image_prompt: contentResult.image_prompt,
-    image_url: imagePath,
-    content_status: imagePath ? 'ready' : 'draft',
+    image_url: cloudImageUrl,
+    content_status: 'pending_review',
+    telegram_message_id: '',
+    review_status: 'pending',
+    reviewed_at: '',
+    reviewed_by: '',
   };
 
   if (!config.dryRun) {
     log.info(`  💾 Saving content for "${opportunity.opportunity_name}"`);
     await sheetsService.addContent(content);
-
-    // Update opportunity status
-    const status = imagePath ? 'ready' : 'content_generated';
-    await sheetsService.updateOpportunityStatus(opportunityId, status);
+    await sheetsService.updateOpportunityStatus(opportunityId, 'pending_review');
   } else {
     log.info(`  [DRY RUN] Would save content for "${opportunity.opportunity_name}"`);
+  }
+
+  // ── Step H: Send to Telegram for review ──
+  if (!config.dryRun) {
+    log.info('  📱 Sending to Telegram for review...');
+    const telegramMessageId = await sendReviewMessage(opportunity, content, localImagePath);
+
+    if (telegramMessageId) {
+      await sheetsService.updateContentTelegramMessageId(opportunityId, String(telegramMessageId));
+      summary.telegramSent++;
+      log.info(`  📱 Telegram review message sent (ID: ${telegramMessageId})`);
+    } else {
+      log.warn('  ⚠️ Failed to send Telegram review message');
+    }
   }
 
   log.info(`  ✅ Successfully processed: "${opportunity.opportunity_name}"`);
@@ -265,6 +292,7 @@ function finalizeSummary(summary: PipelineRunSummary): PipelineRunSummary {
   log.info(`  Opportunities created: ${summary.opportunitiesCreated}`);
   log.info(`  Content generated:     ${summary.contentGenerated}`);
   log.info(`  Images generated:      ${summary.imagesGenerated}`);
+  log.info(`  Telegram sent:         ${summary.telegramSent}`);
   log.info(`  Duplicates skipped:    ${summary.duplicatesSkipped}`);
   log.info(`  Non-opportunities:     ${summary.nonOpportunitiesSkipped}`);
   log.info(`  Errors:                ${summary.errors}`);
