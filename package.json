@@ -5,13 +5,15 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "dev:server": "tsx src/server.ts",
+    "dev": "tsx src/server.ts",
+    "dev:pipeline": "tsx src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "start:server": "node dist/server.js",
+    "start": "node dist/server.js",
+    "start:pipeline": "node dist/index.js",
     "pipeline:run": "tsx src/index.ts",
     "pipeline:dry-run": "DRY_RUN=true tsx src/index.ts",
+    "webhook:register": "tsx src/scripts/register-webhook.ts",
+    "webhook:status": "tsx src/scripts/webhook-status.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

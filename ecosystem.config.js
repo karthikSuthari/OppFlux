@@ -39,9 +39,9 @@ module.exports = {
       exec_mode: 'fork',
     },
 
-    // ─── Webhook Server (Always Running) ───
+    // ─── Unified Server (Always Running — Webhook Mode) ───
     {
-      name: 'content-webhook',
+      name: 'content-server',
       script: 'dist/server.js',
 
       // Always running — restart on crash
@@ -54,15 +54,18 @@ module.exports = {
       restart_delay: 5000,
       max_restarts: 10,
 
+      // Graceful shutdown
+      kill_timeout: 5000,
+
       // Environment
       env: {
         NODE_ENV: 'production',
       },
 
       // Logging
-      log_file: './logs/pm2-webhook-combined.log',
-      out_file: './logs/pm2-webhook-out.log',
-      error_file: './logs/pm2-webhook-error.log',
+      log_file: './logs/pm2-server-combined.log',
+      out_file: './logs/pm2-server-out.log',
+      error_file: './logs/pm2-server-error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss.SSS',
       merge_logs: true,
 

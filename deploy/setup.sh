@@ -9,7 +9,7 @@
 # Prerequisites:
 #   - Oracle Cloud VM with Ubuntu 22.04+ or Oracle Linux 8+
 #   - SSH access configured
-#   - Ports 22 (SSH) open in security list
+#   - Ports 22 (SSH), 80 (HTTP), 443 (HTTPS) open in security list
 # ===========================================
 
 set -euo pipefail
@@ -31,6 +31,17 @@ echo "📦 Installing Git..."
 sudo apt-get install -y git 2>/dev/null || \
 sudo yum install -y git 2>/dev/null || \
 echo "⚠️  Git install failed — may already be installed"
+
+# ─── Install Nginx ───
+echo ""
+echo "📦 Installing Nginx..."
+sudo apt-get install -y nginx 2>/dev/null || \
+sudo yum install -y nginx 2>/dev/null || \
+echo "⚠️  Nginx install failed — may already be installed"
+
+sudo systemctl enable nginx
+sudo systemctl start nginx
+echo "  ✅ Nginx installed and running"
 
 # ─── Install Node.js via NVM ───
 echo ""
@@ -105,6 +116,16 @@ if [ ! -f "${APP_DIR}/.env" ]; then
   echo "═══════════════════════════════════════════"
   echo "⚠️  IMPORTANT: Edit .env with your secrets!"
   echo "  nano ${APP_DIR}/.env"
+  echo ""
+  echo "  Required variables:"
+  echo "    - GEMINI_API_KEY"
+  echo "    - GOOGLE_SHEETS_ID"
+  echo "    - GOOGLE_SERVICE_ACCOUNT_EMAIL"
+  echo "    - GOOGLE_PRIVATE_KEY"
+  echo "    - TELEGRAM_BOT_TOKEN"
+  echo "    - TELEGRAM_CHAT_ID"
+  echo "    - WEBHOOK_URL (your public HTTPS URL)"
+  echo "    - NODE_ENV=production"
   echo "═══════════════════════════════════════════"
 else
   echo "  .env file already exists"
@@ -115,6 +136,32 @@ echo ""
 echo "📁 Creating directories..."
 mkdir -p ${APP_DIR}/images
 mkdir -p ${APP_DIR}/logs
+
+# ─── Configure Nginx ───
+echo ""
+echo "🌐 Configuring Nginx..."
+sudo cp ${APP_DIR}/deploy/nginx.conf /etc/nginx/sites-available/content-engine 2>/dev/null || \
+sudo cp ${APP_DIR}/deploy/nginx.conf /etc/nginx/conf.d/content-engine.conf 2>/dev/null
+
+# Try to create symlink (Debian/Ubuntu style)
+if [ -d "/etc/nginx/sites-enabled" ]; then
+  sudo ln -sf /etc/nginx/sites-available/content-engine /etc/nginx/sites-enabled/
+  # Remove default site
+  sudo rm -f /etc/nginx/sites-enabled/default
+fi
+
+echo "  ⚠️  Remember to edit the Nginx config with your domain!"
+echo "  sudo nano /etc/nginx/sites-available/content-engine"
+echo "  Replace YOUR_DOMAIN_OR_IP with your actual domain"
+
+sudo nginx -t && sudo systemctl reload nginx
+echo "  ✅ Nginx configured"
+
+# ─── SSL Setup Reminder ───
+echo ""
+echo "🔒 SSL Setup:"
+echo "  After pointing your domain to this server, run:"
+echo "    sudo bash ${APP_DIR}/deploy/ssl-setup.sh YOUR_DOMAIN"
 
 # ─── Start with PM2 ───
 echo ""
@@ -130,13 +177,17 @@ echo "  ✅ Setup Complete!"
 echo "═══════════════════════════════════════════"
 echo ""
 echo "  Next steps:"
-echo "  1. Edit .env: nano ${APP_DIR}/.env"
-echo "  2. Restart:   pm2 restart content-engine"
-echo "  3. Logs:      pm2 logs content-engine"
-echo "  4. Monitor:   pm2 monit"
-echo "  5. Status:    pm2 list"
+echo "  1. Edit .env:         nano ${APP_DIR}/.env"
+echo "  2. Set NODE_ENV:      NODE_ENV=production"
+echo "  3. Set WEBHOOK_URL:   WEBHOOK_URL=https://yourdomain.com"
+echo "  4. Edit Nginx config: sudo nano /etc/nginx/sites-available/content-engine"
+echo "  5. Setup SSL:         sudo bash ${APP_DIR}/deploy/ssl-setup.sh yourdomain.com"
+echo "  6. Restart PM2:       pm2 restart all"
+echo "  7. Register webhook:  bash ${APP_DIR}/deploy/register-webhook.sh"
 echo ""
-echo "  The pipeline runs every 30 minutes via PM2 cron."
-echo ""
-echo "  Manual run:   cd ${APP_DIR} && node dist/index.js"
+echo "  Commands:"
+echo "    pm2 list              — View processes"
+echo "    pm2 logs              — View logs"
+echo "    pm2 monit             — Real-time monitoring"
+echo "    bash deploy/deploy.sh — Deploy updates"
 echo ""

@@ -41,11 +41,19 @@ export interface Opportunity {
   created_at: string;
 }
 
-export type OpportunityStatus = 'new' | 'content_generated' | 'image_generated' | 'ready' | 'pending_review' | 'approved' | 'rejected' | 'posted' | 'expired';
+export type OpportunityStatus =
+  | 'new'
+  | 'content_generated'
+  | 'image_generated'
+  | 'pending_review'
+  | 'approved'
+  | 'rejected'
+  | 'ready'
+  | 'posted'
+  | 'expired';
 
 /**
  * Content record stored in the "Content" sheet tab
- * Extended with Telegram review fields
  */
 export interface Content {
   opportunity_id: string;
@@ -55,13 +63,12 @@ export interface Content {
   image_url: string;
   content_status: ContentStatus;
   telegram_message_id: string;
-  review_status: ReviewStatus;
+  review_status: string;
   reviewed_at: string;
   reviewed_by: string;
 }
 
-export type ContentStatus = 'draft' | 'pending_review' | 'ready' | 'approved' | 'rejected' | 'posted';
-export type ReviewStatus = '' | 'pending' | 'approved' | 'rejected';
+export type ContentStatus = 'draft' | 'pending_review' | 'approved' | 'rejected' | 'ready' | 'posted';
 
 /**
  * Posted record stored in the "Posted" sheet tab
@@ -118,60 +125,11 @@ export interface PipelineRunSummary {
   opportunitiesCreated: number;
   contentGenerated: number;
   imagesGenerated: number;
+  telegramSent: number;
   duplicatesSkipped: number;
   nonOpportunitiesSkipped: number;
-  telegramSent: number;
   errors: number;
   errorDetails: string[];
-}
-
-// ─── Telegram Types ───
-
-/**
- * Telegram callback action types
- */
-export type TelegramAction =
-  | 'approve'
-  | 'reject'
-  | 'regen_cap'
-  | 'regen_img'
-  | 'regen_all';
-
-/**
- * Parsed callback data from Telegram inline keyboard
- */
-export interface TelegramCallbackData {
-  action: TelegramAction;
-  opportunityId: string;
-}
-
-/**
- * Telegram Update object (subset of fields we use)
- */
-export interface TelegramUpdate {
-  update_id: number;
-  callback_query?: TelegramCallbackQuery;
-}
-
-export interface TelegramCallbackQuery {
-  id: string;
-  from: TelegramUser;
-  message?: TelegramMessage;
-  data?: string;
-}
-
-export interface TelegramUser {
-  id: number;
-  first_name: string;
-  last_name?: string;
-  username?: string;
-}
-
-export interface TelegramMessage {
-  message_id: number;
-  chat: { id: number };
-  text?: string;
-  caption?: string;
 }
 
 /**
@@ -187,11 +145,103 @@ export interface AppConfig {
   pollIntervalMinutes: number;
   dryRun: boolean;
   geminiRateLimitMs: number;
-  // Telegram
   telegramBotToken: string;
   telegramChatId: string;
-  // Webhook
-  webhookUrl: string;
   webhookPort: number;
+  webhookUrl: string;
   webhookSecret: string;
+  nodeEnv: string;
+}
+
+// ===========================================
+// Telegram Types
+// ===========================================
+
+/**
+ * Telegram user object
+ */
+export interface TelegramUser {
+  id: number;
+  is_bot: boolean;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+}
+
+/**
+ * Telegram chat object
+ */
+export interface TelegramChat {
+  id: number;
+  type: 'private' | 'group' | 'supergroup' | 'channel';
+  title?: string;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+}
+
+/**
+ * Telegram message object
+ */
+export interface TelegramMessage {
+  message_id: number;
+  from?: TelegramUser;
+  chat: TelegramChat;
+  date: number;
+  text?: string;
+  caption?: string;
+  photo?: Array<{ file_id: string; width: number; height: number }>;
+  reply_markup?: {
+    inline_keyboard: Array<Array<{
+      text: string;
+      callback_data?: string;
+      url?: string;
+    }>>;
+  };
+}
+
+/**
+ * Telegram callback query from inline keyboard button presses
+ */
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+  chat_instance: string;
+}
+
+/**
+ * Telegram update — the top-level object received from Telegram
+ */
+export interface TelegramUpdate {
+  update_id: number;
+  message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+}
+
+/**
+ * Parsed callback data from inline keyboard buttons
+ */
+export interface TelegramCallbackData {
+  action: TelegramAction;
+  opportunityId: string;
+}
+
+/**
+ * Valid Telegram callback actions
+ */
+export type TelegramAction = 'approve' | 'reject' | 'regen_cap' | 'regen_img' | 'regen_all' | 'post_now';
+
+/**
+ * Telegram webhook info response
+ */
+export interface TelegramWebhookInfo {
+  url: string;
+  has_custom_certificate: boolean;
+  pending_update_count: number;
+  last_error_date?: number;
+  last_error_message?: string;
+  max_connections?: number;
+  allowed_updates?: string[];
 }
