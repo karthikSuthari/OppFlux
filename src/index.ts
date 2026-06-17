@@ -1,7 +1,7 @@
 // ===========================================
 // Opportunity Content Engine — Entry Point
 // ===========================================
-
+import './services/discord-bot.js';
 import { runPipeline } from './pipeline/runner.js';
 import { logger } from './utils/logger.js';
 

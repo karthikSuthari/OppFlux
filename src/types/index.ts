@@ -136,6 +136,8 @@ export interface PipelineRunSummary {
  * Application configuration
  */
 export interface AppConfig {
+  discordBotToken: string;
+  discordChannelId: string;
   groqApiKey: string;
   geminiApiKey: string;
   googleSheetsId: string;

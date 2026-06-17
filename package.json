@@ -29,6 +29,7 @@
   "license": "MIT",
   "dependencies": {
     "@google/genai": "^2.8.0",
+    "discord.js": "^14.26.4",
     "dotenv": "^16.4.7",
     "express": "^4.21.0",
     "google-auth-library": "^9.15.1",
