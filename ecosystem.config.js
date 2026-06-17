@@ -12,8 +12,8 @@ module.exports = {
       name: 'content-engine',
       script: 'dist/index.js',
 
-      // Cron: run every 1 hour
-      cron_restart: '0 * * * *',
+      // Cron: run every 5 hour
+      cron_restart: '0 */5 * * *',
 
       // Don't auto-restart between cron runs
       autorestart: false,

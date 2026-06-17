@@ -10,7 +10,6 @@ import * as sheetsService from '../services/sheets.service.js';
 import { fetchChannelFeed } from '../services/rss.service.js';
 import { extractOpportunity } from '../services/gemini-extract.service.js';
 import { generateContent } from '../services/gemini-content.service.js';
-import { generateImage } from '../services/gemini-image.service.js';
 import { generateImageLocal } from '../services/gemini-image.service.js';
 import { uploadImage } from '../services/cloud-storage.service.js';
 import { checkDuplicate } from '../services/duplicate.service.js';
@@ -26,98 +25,123 @@ import type {
 const log = createServiceLogger('pipeline');
 const OPPORTUNITY_KEYWORDS = [
 
-'hackathon',
-'internship',
-'scholarship',
-'fellowship',
+  'hackathon',
+  'internship',
+  'scholarship',
+  'fellowship',
 
-'ambassador',
-'facilitator',
+  'ambassador',
+  'facilitator',
 
-'stipend',
-'cash prize',
-'5 lakh',
-'1 lakh',
+  'stipend',
+  'cash prize',
+  '5 lakh',
+  '1 lakh',
 
-'competition',
-'contest',
-'challenge',
+  'competition',
+  'contest',
+  'challenge',
 
-'certificate',
+  'certificate',
 
-'bootcamp',
+  'bootcamp',
 
-'google arcade',
-'arcade facilitator',
+  'google arcade',
+  'arcade facilitator',
 
-'gsoc',
-'season of docs',
-'season of ai',
+  'gsoc',
+  'season of docs',
+  'season of ai',
 
-'grant',
-'funding',
+  'grant',
+  'funding',
 
-'career summit',
-'summit',
+  'career summit',
+  'summit',
 
-'apply now',
-'registrations open',
-'last date',
-'deadline'
+  'apply now',
+  'registrations open',
+  'last date',
+  'deadline'
 
 ];
 function mightBeOpportunity(video: VideoEntry): boolean {
 
-    const title = video.title.toLowerCase();
-    const description = (video.description || '').toLowerCase();
+  const title = video.title.toLowerCase();
+  const description = (video.description || '').toLowerCase();
 
-    const matched = OPPORTUNITY_KEYWORDS.find(
-        keyword =>
-            title.includes(keyword) ||
-            description.includes(keyword)
-    );
+  const matched = OPPORTUNITY_KEYWORDS.find(
+    keyword =>
+      title.includes(keyword) ||
+      description.includes(keyword)
+  );
 
-    if (matched) {
-
-        log.info(
-            `🎯 Keyword matched "${matched}" in "${video.title}"`
-        );
-
-        return true;
-    }
+  if (matched) {
 
     log.info(
-        `⏭️ Keyword skipped "${video.title}"`
+      `🎯 Keyword matched "${matched}" in "${video.title}"`
     );
 
-    return false;
+    return true;
+  }
+
+  log.info(
+    `⏭️ Keyword skipped "${video.title}"`
+  );
+
+  return false;
 }
-const SUSPICIOUS_KEYWORDS = [
-  'telegram banned',
-  '#shorts',
-  '#ytshorts',
-  'movie',
-  'gaming',
-  'vlog',
-  'politics',
-  'cricket',
-  'neet'
-];
+
 
 function isSuspiciousVideo(video: VideoEntry): boolean {
-  const text = (
-    video.title +
-    ' ' +
-    (video.description || '')
-  ).toLowerCase();
 
-  return SUSPICIOUS_KEYWORDS.some(k => text.includes(k));
+  const title = video.title.toLowerCase();
+
+  const blacklist = [
+
+    'live',
+    'stream',
+
+    'podcast',
+
+    'q&a',
+
+    'delete youtube',
+
+    'motivation',
+
+    'after 12th',
+
+    'aman jindal live'
+
+  ];
+
+
+  const matched = blacklist.find(
+    k => title.includes(k)
+  );
+
+  if (matched) {
+
+    log.info(
+      `⏭️ Suspicious skipped because "${matched}"`
+    );
+
+    return true;
+  }
+
+  return false;
+
 }
 
 function shouldSkipVideo(video: VideoEntry): boolean {
 
   if (isSuspiciousVideo(video)) {
-    log.info(`⏭️ Suspicious video skipped: "${video.title}"`);
+
+    log.info(
+      `⏭️ Suspicious video skipped: "${video.title}"`
+    );
+
     return true;
   }
 
@@ -257,9 +281,9 @@ async function processVideo(
 
   summary.videosProcessed++;
   if (shouldSkipVideo(video)) {
-  summary.nonOpportunitiesSkipped++;
-  return;
-}
+    summary.nonOpportunitiesSkipped++;
+    return;
+  }
 
   // ── Step A: Pre-extraction duplicate check (Video ID) ──
   const preCheck = await checkDuplicate(video, null);
@@ -270,16 +294,107 @@ async function processVideo(
   }
 
   // ── Step B: Extract opportunity data via Groq ──
-log.info('  🤖 Extracting opportunity data...');
-await sleep(config.geminiRateLimitMs);
+  log.info('  🤖 Extracting opportunity data...');
+  await sleep(config.geminiRateLimitMs);
 
-const extraction = await extractOpportunity(video);
+  const mustContain = [
+
+    'hackathon',
+
+    'internship',
+
+    'scholarship',
+    'fellowship',
+
+    'ambassador',
+
+    'facilitator',
+
+    'stipend',
+
+    'grant',
+
+    'certificate',
+
+    'bootcamp',
+
+    'summit',
+
+    'competition',
+    'contest',
+    'challenge',
+
+    'gsoc',
+
+    'season of ai',
+
+    'season of docs',
+
+    'google arcade',
+
+    'kaggle'
+
+  ];
+  const title = video.title.toLowerCase();
+
+  if (!mustContain.some(
+    k => title.includes(k)
+  )) {
+
+    summary.nonOpportunitiesSkipped++;
+
+    return;
+
+  }
+  let extraction: GeminiExtraction | null = null;
+
+
+  try {
+
+    extraction = await extractOpportunity(video);
+
+  }
+  catch (error) {
+
+    const msg =
+      String(error);
+
+
+    if (
+      msg.includes('429')
+      ||
+      msg.includes('rate_limit_exceeded')
+    ) {
+
+      log.warn(
+        '🚫 Groq daily quota exhausted'
+      );
+
+
+      summary.nonOpportunitiesSkipped++;
+
+      return;
+    }
+
+
+    throw error;
+
+  }
+
+
 
   if (!extraction) {
-    log.info(`  ⏭️ Skipping: Not a student opportunity`);
+
+    log.info(
+      '  ⏭️ Skipping: Not a student opportunity'
+    );
+
     summary.nonOpportunitiesSkipped++;
+
     return;
+
   }
+
 
   // ── Step C: Post-extraction duplicate check (reg link + name) ──
   const postCheck = await checkDuplicate(video, extraction);
@@ -365,12 +480,12 @@ const extraction = await extractOpportunity(video);
   }
 
   // ── Step H: Send to Discord for review ──
-if (!config.dryRun) {
-  log.info('  📢 Sending to Discord for review...');
+  if (!config.dryRun) {
+    log.info('  📢 Sending to Discord for review...');
 
-  try {
-    await sendDiscordMessage(
-      `📋 **${opportunity.opportunity_name}**
+    try {
+      await sendDiscordMessage(
+        `📋 **${opportunity.opportunity_name}**
 🏢 Organizer: ${opportunity.organizer}
 📅 Deadline: ${opportunity.deadline}
 🎓 Eligibility: ${opportunity.eligibility}
@@ -382,14 +497,14 @@ if (!config.dryRun) {
 ━━━━━━━━━━━━━━
 
 ${content.caption}`
-    );
+      );
 
-    summary.telegramSent++;
-    log.info('  📢 Discord review message sent');
-  } catch (err) {
-    log.warn('  ⚠️ Failed to send Discord message');
+      summary.telegramSent++;
+      log.info('  📢 Discord review message sent');
+    } catch (err) {
+      log.warn('  ⚠️ Failed to send Discord message');
+    }
   }
-}
 
   log.info(`  ✅ Successfully processed: "${opportunity.opportunity_name}"`);
 }
