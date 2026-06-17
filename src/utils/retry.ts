@@ -38,6 +38,17 @@ export async function withRetry<T>(
     try {
       return await fn();
     } catch (error) {
+        const msg =
+error instanceof Error
+? error.message
+: String(error);
+
+
+if (
+msg.includes("rate_limit_exceeded")
+){
+throw error;
+}
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (attempt === maxRetries) {

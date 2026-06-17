@@ -47,7 +47,7 @@ export async function initializeSheets(): Promise<GoogleSpreadsheet> {
 
   const auth = new JWT({
     email: config.googleServiceAccountEmail,
-    key: config.googlePrivateKey,
+    key: config.googlePrivateKey.replace(/\\n/g,'\n'),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 

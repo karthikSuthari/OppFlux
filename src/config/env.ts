@@ -35,6 +35,7 @@ function loadConfig(): AppConfig {
   }
 
   const config: AppConfig = {
+    groqApiKey: requireEnv('GROQ_API_KEY'),
     geminiApiKey: requireEnv('GEMINI_API_KEY'),
     googleSheetsId: requireEnv('GOOGLE_SHEETS_ID'),
     googleServiceAccountEmail: requireEnv('GOOGLE_SERVICE_ACCOUNT_EMAIL'),
@@ -46,6 +47,7 @@ function loadConfig(): AppConfig {
     geminiRateLimitMs: parseInt(optionalEnv('GEMINI_RATE_LIMIT_MS', '1500'), 10),
     telegramBotToken: requireEnv('TELEGRAM_BOT_TOKEN'),
     telegramChatId: requireEnv('TELEGRAM_CHAT_ID'),
+    discordWebhookUrl: optionalEnv('DISCORD_WEBHOOK_URL', ''),
     webhookPort: parseInt(optionalEnv('WEBHOOK_PORT', '3000'), 10),
     webhookUrl: optionalEnv('WEBHOOK_URL', ''),
     webhookSecret: optionalEnv('WEBHOOK_SECRET', ''),

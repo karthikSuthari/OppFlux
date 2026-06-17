@@ -45,7 +45,7 @@ Style: Modern flat design with subtle 3D elements, gradient backgrounds, clean c
     const response = await withRetry(
       async () => {
         const result = await ai.models.generateContent({
-          model: 'gemini-2.0-flash-preview-image-generation',
+          model: 'gemini-2.5-flash-image-preview',
           contents: [
             {
               role: 'user',
@@ -132,7 +132,7 @@ Style: Modern flat design with subtle 3D elements, gradient backgrounds, clean c
     const response = await withRetry(
       async () => {
         const result = await ai.models.generateContent({
-          model: 'gemini-2.0-flash-preview-image-generation',
+          model: 'gemini-2.5-flash-image-preview',
           contents: [
             {
               role: 'user',

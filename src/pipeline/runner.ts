@@ -14,7 +14,7 @@ import { generateImage } from '../services/gemini-image.service.js';
 import { generateImageLocal } from '../services/gemini-image.service.js';
 import { uploadImage } from '../services/cloud-storage.service.js';
 import { checkDuplicate } from '../services/duplicate.service.js';
-import { sendReviewMessage } from '../services/telegram.service.js';
+import { sendDiscordMessage } from '../services/discord.service.js';
 import type {
   PipelineRunSummary,
   Opportunity,
@@ -24,7 +24,110 @@ import type {
 } from '../types/index.js';
 
 const log = createServiceLogger('pipeline');
+const OPPORTUNITY_KEYWORDS = [
 
+'hackathon',
+'internship',
+'scholarship',
+'fellowship',
+
+'ambassador',
+'facilitator',
+
+'stipend',
+'cash prize',
+'5 lakh',
+'1 lakh',
+
+'competition',
+'contest',
+'challenge',
+
+'certificate',
+
+'bootcamp',
+
+'google arcade',
+'arcade facilitator',
+
+'gsoc',
+'season of docs',
+'season of ai',
+
+'grant',
+'funding',
+
+'career summit',
+'summit',
+
+'apply now',
+'registrations open',
+'last date',
+'deadline'
+
+];
+function mightBeOpportunity(video: VideoEntry): boolean {
+
+    const title = video.title.toLowerCase();
+    const description = (video.description || '').toLowerCase();
+
+    const matched = OPPORTUNITY_KEYWORDS.find(
+        keyword =>
+            title.includes(keyword) ||
+            description.includes(keyword)
+    );
+
+    if (matched) {
+
+        log.info(
+            `🎯 Keyword matched "${matched}" in "${video.title}"`
+        );
+
+        return true;
+    }
+
+    log.info(
+        `⏭️ Keyword skipped "${video.title}"`
+    );
+
+    return false;
+}
+const SUSPICIOUS_KEYWORDS = [
+  'telegram banned',
+  '#shorts',
+  '#ytshorts',
+  'movie',
+  'gaming',
+  'vlog',
+  'politics',
+  'cricket',
+  'neet'
+];
+
+function isSuspiciousVideo(video: VideoEntry): boolean {
+  const text = (
+    video.title +
+    ' ' +
+    (video.description || '')
+  ).toLowerCase();
+
+  return SUSPICIOUS_KEYWORDS.some(k => text.includes(k));
+}
+
+function shouldSkipVideo(video: VideoEntry): boolean {
+
+  if (isSuspiciousVideo(video)) {
+    log.info(`⏭️ Suspicious video skipped: "${video.title}"`);
+    return true;
+  }
+
+  if (!mightBeOpportunity(video)) {
+    log.info(`⏭️ Keyword filter skipped: "${video.title}"`);
+    return true;
+  }
+
+  return false;
+}
 /**
  * Run the complete opportunity content pipeline:
  *
@@ -153,6 +256,10 @@ async function processVideo(
   });
 
   summary.videosProcessed++;
+  if (shouldSkipVideo(video)) {
+  summary.nonOpportunitiesSkipped++;
+  return;
+}
 
   // ── Step A: Pre-extraction duplicate check (Video ID) ──
   const preCheck = await checkDuplicate(video, null);
@@ -162,10 +269,11 @@ async function processVideo(
     return;
   }
 
-  // ── Step B: Extract opportunity data via Gemini ──
-  log.info('  🤖 Extracting opportunity data...');
-  await sleep(config.geminiRateLimitMs);
-  const extraction = await extractOpportunity(video);
+  // ── Step B: Extract opportunity data via Groq ──
+log.info('  🤖 Extracting opportunity data...');
+await sleep(config.geminiRateLimitMs);
+
+const extraction = await extractOpportunity(video);
 
   if (!extraction) {
     log.info(`  ⏭️ Skipping: Not a student opportunity`);
@@ -256,19 +364,32 @@ async function processVideo(
     log.info(`  [DRY RUN] Would save content for "${opportunity.opportunity_name}"`);
   }
 
-  // ── Step H: Send to Telegram for review ──
-  if (!config.dryRun) {
-    log.info('  📱 Sending to Telegram for review...');
-    const telegramMessageId = await sendReviewMessage(opportunity, content, localImagePath);
+  // ── Step H: Send to Discord for review ──
+if (!config.dryRun) {
+  log.info('  📢 Sending to Discord for review...');
 
-    if (telegramMessageId) {
-      await sheetsService.updateContentTelegramMessageId(opportunityId, String(telegramMessageId));
-      summary.telegramSent++;
-      log.info(`  📱 Telegram review message sent (ID: ${telegramMessageId})`);
-    } else {
-      log.warn('  ⚠️ Failed to send Telegram review message');
-    }
+  try {
+    await sendDiscordMessage(
+      `📋 **${opportunity.opportunity_name}**
+🏢 Organizer: ${opportunity.organizer}
+📅 Deadline: ${opportunity.deadline}
+🎓 Eligibility: ${opportunity.eligibility}
+🏆 Rewards: ${opportunity.rewards}
+
+🔗 Registration: ${opportunity.registration_link}
+📺 Source: ${opportunity.source_video}
+
+━━━━━━━━━━━━━━
+
+${content.caption}`
+    );
+
+    summary.telegramSent++;
+    log.info('  📢 Discord review message sent');
+  } catch (err) {
+    log.warn('  ⚠️ Failed to send Discord message');
   }
+}
 
   log.info(`  ✅ Successfully processed: "${opportunity.opportunity_name}"`);
 }

@@ -136,6 +136,7 @@ export interface PipelineRunSummary {
  * Application configuration
  */
 export interface AppConfig {
+  groqApiKey: string;
   geminiApiKey: string;
   googleSheetsId: string;
   googleServiceAccountEmail: string;
@@ -147,6 +148,7 @@ export interface AppConfig {
   geminiRateLimitMs: number;
   telegramBotToken: string;
   telegramChatId: string;
+  discordWebhookUrl: string;
   webhookPort: number;
   webhookUrl: string;
   webhookSecret: string;

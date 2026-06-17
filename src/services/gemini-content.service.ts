@@ -2,7 +2,7 @@
 // Gemini Content Generation Service
 // ===========================================
 
-import { GoogleGenAI } from '@google/genai';
+import Groq from 'groq-sdk';
 import { config } from '../config/env.js';
 import { createServiceLogger } from '../utils/logger.js';
 import { withRetry } from '../utils/retry.js';
@@ -10,33 +10,49 @@ import type { GeminiExtraction, GeminiContentResult } from '../types/index.js';
 
 const log = createServiceLogger('gemini-content');
 
-const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+const groq = new Groq({
+  apiKey: config.groqApiKey,
+});
 
 /**
  * System prompt for Instagram content generation.
  * Generates caption, hashtags, carousel text, and image prompt.
  */
-const CONTENT_PROMPT = `You are a social media content creator specializing in student opportunities. You create engaging, professional Instagram content that drives student engagement.
+
+const CONTENT_PROMPT = `You are a social media content creator specializing in student opportunities.
 
 Given opportunity details, generate Instagram-ready content.
 
-Return ONLY valid JSON in this exact format, with no additional text, markdown, or code fences:
+Return ONLY valid JSON.
+
+Do not use markdown.
+Do not use code fences.
+Do not explain anything.
+
+Escape newlines using \\n.
+
+Output MUST be parseable by JSON.parse().
+
+Expected format:
+
 {
-  "caption": "An engaging Instagram caption (150-250 words). Include: hook line, opportunity details, eligibility, deadline, CTA. Use emojis strategically. Include line breaks for readability. End with a clear call-to-action.",
-  "hashtags": ["hashtag1", "hashtag2", "...up to 20 relevant hashtags without # symbol"],
-  "carousel_text": "Short punchy text for carousel slides (50-80 words). Key points only. Use bullet points with emojis.",
-  "image_prompt": "A detailed prompt for AI image generation. Describe a clean, modern, professional Instagram post visual. Include: style (flat design/3D/gradient), color scheme, key visual elements (icons, illustrations), text overlay suggestions. The image should be student-oriented and tech-focused."
+  "caption":"...",
+  "hashtags":["a","b"],
+  "carousel_text":"...",
+  "image_prompt":"..."
 }
 
-CONTENT GUIDELINES:
-1. Be concise and student-focused
-2. Avoid spam language (no "AMAZING!!!" or "DON'T MISS THIS!!!")
-3. Use a professional but approachable tone
-4. Include relevant emojis (📚🎓💻🏆🚀) but don't overdo it
-5. Make the caption scannable with line breaks
-6. Hashtags should mix popular (#students #opportunities) with niche (#techscholarship)
-7. The image prompt should describe a visually striking, modern design
-8. Caption must include the registration link if available`;
+Guidelines:
+
+- Caption: 150-250 words
+- Professional but student-friendly tone
+- Use emojis sparingly
+- Include CTA
+- Include registration link if available
+- Hashtags should NOT contain #
+- carousel_text should be short
+- image_prompt should describe a modern Instagram visual
+`;
 
 /**
  * Generate Instagram-ready content from opportunity data.
@@ -67,26 +83,33 @@ Create engaging, professional Instagram content for this opportunity.`;
   try {
     const response = await withRetry(
       async () => {
-        const result = await ai.models.generateContent({
-          model: 'gemini-2.0-flash',
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: CONTENT_PROMPT + '\n\n' + userPrompt }],
-            },
-          ],
-          config: {
-            temperature: 0.7, // Higher creativity for content
-            maxOutputTokens: 2048,
-          },
-        });
-        return result;
+      const result = await groq.chat.completions.create({
+  model: 'llama-3.1-8b-instant',
+  temperature: 0.7,
+ response_format: {
+    type: 'json_object'
+  },
+  messages: [
+    {
+      role: 'user',
+      content: CONTENT_PROMPT + '\n\n' + userPrompt,
+    },
+  ],
+});
+
+return result;  
       },
       { operationName: 'gemini.generateContent', maxRetries: 2 }
     );
 
-    const text = response.text?.trim();
-    if (!text) {
+       const text = response.choices?.[0]?.message?.content?.trim();
+log.warn("RAW GROQ RESPONSE");
+console.log(text);      
+log.info('====================');
+log.info('GROQ RAW RESPONSE');
+console.log(text);
+log.info('===================='); 
+      if (!text) {
       log.warn('Empty response from Gemini for content generation');
       return null;
     }

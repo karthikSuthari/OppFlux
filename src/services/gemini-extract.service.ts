@@ -2,7 +2,7 @@
 // Gemini Opportunity Extraction Service
 // ===========================================
 
-import { GoogleGenAI } from '@google/genai';
+import Groq from 'groq-sdk';
 import { config } from '../config/env.js';
 import { createServiceLogger } from '../utils/logger.js';
 import { withRetry } from '../utils/retry.js';
@@ -10,7 +10,9 @@ import type { GeminiExtraction, VideoEntry } from '../types/index.js';
 
 const log = createServiceLogger('gemini-extract');
 
-const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+const groq = new Groq({
+  apiKey: config.groqApiKey,
+});
 
 /**
  * System prompt for opportunity extraction.
@@ -75,25 +77,23 @@ Analyze this video and extract opportunity information.`;
   try {
     const response = await withRetry(
       async () => {
-        const result = await ai.models.generateContent({
-          model: 'gemini-2.0-flash',
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: EXTRACTION_PROMPT + '\n\n' + userPrompt }],
-            },
-          ],
-          config: {
-            temperature: 0.1, // Low temperature for consistent structured output
-            maxOutputTokens: 1024,
-          },
-        });
-        return result;
+        const result = await groq.chat.completions.create({
+  model: 'llama-3.1-8b-instant',
+  temperature: 0.1,
+  messages: [
+    {
+      role: 'user',
+      content: EXTRACTION_PROMPT + '\n\n' + userPrompt,
+    },
+  ],
+});
+
+return result;
       },
       { operationName: 'gemini.extractOpportunity', maxRetries: 2 }
     );
 
-    const text = response.text?.trim();
+    const text = response.choices?.[0]?.message?.content?.trim();
     if (!text) {
       log.warn('Empty response from Gemini for extraction', { videoId: video.videoId });
       return null;
