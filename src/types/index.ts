@@ -12,6 +12,16 @@ export interface Channel {
 }
 
 /**
+ * Web scraping source configuration from the "ScrapingSources" sheet tab
+ */
+export interface ScrapingSource {
+  source_name: string;
+  source_url: string;
+  filter: string;      // keyword filter (e.g. "telangana", "microsoft"), or empty for no filter
+  active: string;      // "TRUE" or "FALSE"
+}
+
+/**
  * Parsed video entry from YouTube RSS feed
  */
 export interface VideoEntry {

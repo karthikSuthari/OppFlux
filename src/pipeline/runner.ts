@@ -12,9 +12,10 @@ import { extractOpportunity } from '../services/gemini-extract.service.js';
 import { generateContent } from '../services/gemini-content.service.js';
 import { generateImageLocal } from '../services/gemini-image.service.js';
 import { uploadImage } from '../services/cloud-storage.service.js';
-import { checkDuplicate } from '../services/duplicate.service.js';
+import { checkDuplicate, checkScrapedDuplicate } from '../services/duplicate.service.js';
 import { sendDiscordMessage, sendDiscordReviewMessage } from '../services/discord.service.js';
 import { savePendingOpportunity } from '../services/pending-store.service.js';
+import { runWebScraper } from '../services/web-scraper.service.js';
 import type {
   PipelineRunSummary,
   Opportunity,
@@ -218,6 +219,31 @@ export async function runPipeline(): Promise<PipelineRunSummary> {
       // Brief pause between channels
       await sleep(500);
     }
+
+    // Step 4: Web Scraping
+    log.info('\nStep 4: Running web scraper...');
+    try {
+      const scrapedOpportunities = await runWebScraper();
+      log.info(`Web scraper returned ${scrapedOpportunities.length} opportunities`);
+
+      for (const scraped of scrapedOpportunities) {
+        try {
+          await processScrapedOpportunity(scraped.extraction, scraped.sourceUrl, scraped.sourceName, summary);
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          log.error(`Scraped opportunity processing failed: "${scraped.extraction.opportunity_name}"`, { error: errMsg });
+          summary.errors++;
+          summary.errorDetails.push(`Scraped "${scraped.extraction.opportunity_name}": ${errMsg}`);
+        }
+        await sleep(config.geminiRateLimitMs);
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      log.error('Web scraping step failed', { error: errMsg });
+      summary.errors++;
+      summary.errorDetails.push(`Web Scraper: ${errMsg}`);
+    }
+
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     log.error('Pipeline run failed', { error: errMsg });
@@ -492,6 +518,100 @@ async function processVideo(
   }
 
   log.info(`  ✅ Successfully processed: "${opportunity.opportunity_name}"`);
+}
+
+/**
+ * Process a single scraped opportunity through the same pipeline as YouTube:
+ * Duplicate check → Content generation → Image generation → Discord review
+ */
+async function processScrapedOpportunity(
+  extraction: GeminiExtraction,
+  sourceUrl: string,
+  sourceName: string,
+  summary: PipelineRunSummary
+): Promise<void> {
+  log.info(`\n  🌐 Processing scraped: "${extraction.opportunity_name}"`);
+
+  // ── Step A: Duplicate check ──
+  const dupCheck = await checkScrapedDuplicate(extraction, sourceUrl);
+  if (dupCheck.isDuplicate) {
+    log.info(`  ⏭️ Skipping (duplicate): ${dupCheck.reason}`);
+    summary.duplicatesSkipped++;
+    return;
+  }
+
+  // ── Step B: Build opportunity object ──
+  const opportunityId = uuidv4().substring(0, 8);
+  const opportunity: Opportunity = {
+    id: opportunityId,
+    opportunity_name: extraction.opportunity_name,
+    organizer: extraction.organizer,
+    registration_link: extraction.registration_link,
+    deadline: extraction.deadline,
+    eligibility: extraction.eligibility,
+    rewards: extraction.rewards,
+    source_video: sourceUrl,
+    source_channel: sourceName,
+    status: 'new',
+    created_at: new Date().toISOString(),
+  };
+
+  if (!config.dryRun) {
+    log.info(`  💾 Skipping immediate Sheets save (waiting for Discord reaction) for "${opportunity.opportunity_name}"`);
+  }
+
+  // ── Step C: Generate Instagram content ──
+  log.info('  ✍️ Generating Instagram content...');
+  await sleep(config.geminiRateLimitMs);
+  const contentResult = await generateContent(extraction, extraction.opportunity_name);
+
+  if (!contentResult) {
+    log.warn('  ⚠️ Content generation failed — skipping');
+    return;
+  }
+  summary.contentGenerated++;
+
+  // ── Step D: Skip image generation for web-scraped opportunities ──
+  log.info('  🖼️ Skipping image generation (not needed for web-scraped)');
+  const cloudImageUrl = '';
+
+  // ── Step E: Build content object ──
+  const hashtags = contentResult.hashtags.map((h) => `#${h}`).join(' ');
+  const content: Content = {
+    opportunity_id: opportunityId,
+    caption: contentResult.caption,
+    hashtags,
+    image_prompt: contentResult.image_prompt,
+    image_url: cloudImageUrl,
+    content_status: 'pending_review',
+    telegram_message_id: '',
+    review_status: 'pending',
+    reviewed_at: '',
+    reviewed_by: '',
+  };
+
+  // ── Step F: Send to Discord for review ──
+  if (!config.dryRun) {
+    log.info('  📢 Sending to Discord for review...');
+    try {
+      const messageId = await sendDiscordReviewMessage(
+        `🌐 **[WEB] ${opportunity.opportunity_name}**\n🏢 Organizer: ${opportunity.organizer}\n📅 Deadline: ${opportunity.deadline}\n🎓 Eligibility: ${opportunity.eligibility}\n🏆 Rewards: ${opportunity.rewards}\n\n🔗 Registration: ${opportunity.registration_link}\n📺 Source: ${opportunity.source_video}\n\n━━━━━━━━━━━━━━\n\n${content.caption}`
+      );
+
+      if (messageId) {
+        savePendingOpportunity(messageId, opportunity, content);
+        summary.telegramSent++;
+        log.info('  📢 Discord review message sent, awaiting reaction');
+      } else {
+        log.warn('  ⚠️ Failed to send Discord review message');
+      }
+    } catch (err) {
+      log.warn('  ⚠️ Failed to send Discord message');
+    }
+  }
+
+  summary.opportunitiesCreated++;
+  log.info(`  ✅ Successfully processed scraped: "${opportunity.opportunity_name}"`);
 }
 
 /**

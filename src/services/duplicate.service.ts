@@ -137,3 +137,79 @@ export async function checkDuplicate(
     return NOT_DUPLICATE;
   }
 }
+
+/**
+ * Check if a scraped opportunity is a duplicate.
+ * Uses only Layer 2 (registration link) and Layer 3 (fuzzy name match)
+ * since there is no video ID for web-scraped sources.
+ */
+export async function checkScrapedDuplicate(
+  extraction: GeminiExtraction,
+  sourceUrl: string
+): Promise<DuplicateCheckResult> {
+  const NOT_DUPLICATE: DuplicateCheckResult = {
+    isDuplicate: false,
+    reason: 'No duplicate found',
+  };
+
+  try {
+    const existingOpportunities = await sheetsService.getExistingOpportunities();
+
+    if (existingOpportunities.length === 0) {
+      return NOT_DUPLICATE;
+    }
+
+    // Check source URL match
+    const urlMatch = existingOpportunities.find(
+      (opp) => opp.source_video === sourceUrl
+    );
+    if (urlMatch) {
+      log.info(`Duplicate: Source URL already processed as "${urlMatch.opportunity_name}"`);
+      return {
+        isDuplicate: true,
+        reason: `Source URL already processed (opportunity: "${urlMatch.opportunity_name}")`,
+        matchedField: 'video_id',
+      };
+    }
+
+    // Registration link check
+    if (extraction.registration_link && extraction.registration_link !== 'Not specified') {
+      const linkMatch = existingOpportunities.find(
+        (opp) => opp.registration_link === extraction.registration_link
+      );
+      if (linkMatch) {
+        log.info(`Duplicate: Registration link matches existing "${linkMatch.opportunity_name}"`);
+        return {
+          isDuplicate: true,
+          reason: `Registration link already exists (opportunity: "${linkMatch.opportunity_name}")`,
+          matchedField: 'registration_link',
+        };
+      }
+    }
+
+    // Fuzzy name matching
+    if (extraction.opportunity_name) {
+      const SIMILARITY_THRESHOLD = 0.85;
+      for (const opp of existingOpportunities) {
+        const sim = similarity(extraction.opportunity_name, opp.opportunity_name);
+        if (sim >= SIMILARITY_THRESHOLD) {
+          log.info(
+            `Duplicate: Name "${extraction.opportunity_name}" similar to "${opp.opportunity_name}" (${(sim * 100).toFixed(1)}% match)`
+          );
+          return {
+            isDuplicate: true,
+            reason: `Name similar to existing: "${opp.opportunity_name}" (${(sim * 100).toFixed(1)}% match)`,
+            matchedField: 'opportunity_name',
+          };
+        }
+      }
+    }
+
+    return NOT_DUPLICATE;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    log.error('Scraped duplicate check failed', { error: errMsg });
+    return NOT_DUPLICATE;
+  }
+}
+

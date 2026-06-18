@@ -7,13 +7,14 @@ import { JWT } from 'google-auth-library';
 import { config } from '../config/env.js';
 import { createServiceLogger } from '../utils/logger.js';
 import { withRetry } from '../utils/retry.js';
-import type { Channel, Opportunity, Content, Posted } from '../types/index.js';
+import type { Channel, ScrapingSource, Opportunity, Content, Posted } from '../types/index.js';
 
 const log = createServiceLogger('sheets');
 
 // Sheet tab names
 const TABS = {
   CHANNELS: 'Channels',
+  SCRAPING_SOURCES: 'ScrapingSources',
   OPPORTUNITIES: 'Opportunities',
   CONTENT: 'Content',
   POSTED: 'Posted',
@@ -22,6 +23,7 @@ const TABS = {
 // Column headers for each tab (used for initialization)
 const HEADERS = {
   [TABS.CHANNELS]: ['channel_name', 'channel_id', 'active'],
+  [TABS.SCRAPING_SOURCES]: ['source_name', 'source_url', 'filter', 'active'],
   [TABS.OPPORTUNITIES]: [
     'id', 'opportunity_name', 'organizer', 'registration_link',
     'deadline', 'eligibility', 'rewards', 'source_video',
@@ -111,6 +113,36 @@ export async function getActiveChannels(): Promise<Channel[]> {
 
   log.info(`Found ${channels.length} active channels out of ${rows.length} total`);
   return channels;
+}
+
+/**
+ * Get all active scraping sources from the ScrapingSources tab
+ */
+export async function getActiveScrapingSources(): Promise<ScrapingSource[]> {
+  if (!doc) throw new Error('Sheets not initialized');
+
+  const sheet = doc.sheetsByTitle[TABS.SCRAPING_SOURCES];
+  if (!sheet) {
+    log.warn(`Tab "${TABS.SCRAPING_SOURCES}" not found — no scraping sources configured`);
+    return [];
+  }
+
+  const rows = await withRetry(
+    () => sheet.getRows(),
+    { operationName: 'sheets.getActiveScrapingSources' }
+  );
+
+  const sources: ScrapingSource[] = rows
+    .map((row: GoogleSpreadsheetRow) => ({
+      source_name: row.get('source_name') || '',
+      source_url: row.get('source_url') || '',
+      filter: row.get('filter') || '',
+      active: row.get('active') || 'FALSE',
+    }))
+    .filter((s: ScrapingSource) => s.active.toUpperCase() === 'TRUE' && s.source_url);
+
+  log.info(`Found ${sources.length} active scraping sources out of ${rows.length} total`);
+  return sources;
 }
 
 /**
