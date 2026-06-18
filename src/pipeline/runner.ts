@@ -13,7 +13,8 @@ import { generateContent } from '../services/gemini-content.service.js';
 import { generateImageLocal } from '../services/gemini-image.service.js';
 import { uploadImage } from '../services/cloud-storage.service.js';
 import { checkDuplicate } from '../services/duplicate.service.js';
-import { sendDiscordMessage } from '../services/discord.service.js';
+import { sendDiscordMessage, sendDiscordReviewMessage } from '../services/discord.service.js';
+import { savePendingOpportunity } from '../services/pending-store.service.js';
 import type {
   PipelineRunSummary,
   Opportunity,
@@ -421,12 +422,9 @@ async function processVideo(
   };
 
   if (!config.dryRun) {
-    log.info(`  💾 Saving opportunity: "${opportunity.opportunity_name}"`);
-    await sheetsService.addOpportunity(opportunity);
-    summary.opportunitiesCreated++;
+    log.info(`  💾 Skipping immediate Sheets save (waiting for Discord reaction) for "${opportunity.opportunity_name}"`);
   } else {
-    log.info(`  [DRY RUN] Would save opportunity: "${opportunity.opportunity_name}"`);
-    summary.opportunitiesCreated++;
+    log.info(`  [DRY RUN] Would skip immediate Sheets save for "${opportunity.opportunity_name}"`);
   }
 
   // ── Step E: Generate Instagram content via Gemini ──
@@ -456,7 +454,7 @@ async function processVideo(
     log.info(`  ☁️ Image uploaded to cloud: ${cloudImageUrl}`);
   }
 
-  // ── Step G: Save content to Sheets ──
+  // ── Step G: Initialize content for Sheets ──
   const hashtags = contentResult.hashtags.map((h) => `#${h}`).join(' ');
   const content: Content = {
     opportunity_id: opportunityId,
@@ -471,36 +469,23 @@ async function processVideo(
     reviewed_by: '',
   };
 
-  if (!config.dryRun) {
-    log.info(`  💾 Saving content for "${opportunity.opportunity_name}"`);
-    await sheetsService.addContent(content);
-    await sheetsService.updateOpportunityStatus(opportunityId, 'pending_review');
-  } else {
-    log.info(`  [DRY RUN] Would save content for "${opportunity.opportunity_name}"`);
-  }
 
   // ── Step H: Send to Discord for review ──
   if (!config.dryRun) {
     log.info('  📢 Sending to Discord for review...');
 
     try {
-      await sendDiscordMessage(
-        `📋 **${opportunity.opportunity_name}**
-🏢 Organizer: ${opportunity.organizer}
-📅 Deadline: ${opportunity.deadline}
-🎓 Eligibility: ${opportunity.eligibility}
-🏆 Rewards: ${opportunity.rewards}
-
-🔗 Registration: ${opportunity.registration_link}
-📺 Source: ${opportunity.source_video}
-
-━━━━━━━━━━━━━━
-
-${content.caption}`
+      const messageId = await sendDiscordReviewMessage(
+        `📋 **${opportunity.opportunity_name}**\n🏢 Organizer: ${opportunity.organizer}\n📅 Deadline: ${opportunity.deadline}\n🎓 Eligibility: ${opportunity.eligibility}\n🏆 Rewards: ${opportunity.rewards}\n\n🔗 Registration: ${opportunity.registration_link}\n📺 Source: ${opportunity.source_video}\n\n━━━━━━━━━━━━━━\n\n${content.caption}`
       );
 
-      summary.telegramSent++;
-      log.info('  📢 Discord review message sent');
+      if (messageId) {
+        savePendingOpportunity(messageId, opportunity, content);
+        summary.telegramSent++;
+        log.info('  📢 Discord review message sent, awaiting reaction');
+      } else {
+        log.warn('  ⚠️ Failed to send Discord review message or retrieve message ID');
+      }
     } catch (err) {
       log.warn('  ⚠️ Failed to send Discord message');
     }

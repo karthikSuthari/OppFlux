@@ -31,7 +31,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    process.exit(0);
+    // process.exit(0); // Removed to keep Discord bot alive for reactions
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : '';
