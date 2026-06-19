@@ -52,7 +52,8 @@ IMPORTANT RULES:
 1. Return ONLY the JSON object — no markdown formatting, no code blocks, no extra text.
 2. For registration_link, search the description for URLs that look like registration/apply/signup pages.
 3. Be conservative — only mark as opportunity if there is clear evidence.
-4. Extract the MOST relevant registration link, not all links.`;
+4. Extract the MOST relevant registration link, not all links.
+5. CRITICAL DEADLINE CHECK: Pay close attention to "TODAY'S DATE" provided in the user prompt. If the video explicitly states a registration deadline or event date that has ALREADY PASSED relative to today's date, you MUST set "is_opportunity": false.`;
 
 /**
  * Extract structured opportunity data from a YouTube video using Gemini.
@@ -65,7 +66,7 @@ export async function extractOpportunity(
 ): Promise<GeminiExtraction | null> {
   log.info(`Extracting opportunity from: "${video.title}"`);
 
-  const userPrompt = `VIDEO TITLE: ${video.title}
+  const userPrompt = `TODAY'S DATE: ${new Date().toDateString()}\n\nVIDEO TITLE: ${video.title}
 
 VIDEO DESCRIPTION:
 ${video.description || 'No description available'}

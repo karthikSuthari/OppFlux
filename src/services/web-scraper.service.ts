@@ -66,7 +66,8 @@ If the text is NOT about a student opportunity (e.g., it's a Terms of Service, P
 IMPORTANT RULES:
 1. Return ONLY the JSON object — no markdown formatting, no code blocks, no extra text.
 2. Be conservative — only mark as opportunity if there is clear evidence.
-3. Extract the MOST relevant registration link.`;
+3. Extract the MOST relevant registration link.
+4. CRITICAL DEADLINE CHECK: Pay close attention to "TODAY'S DATE" provided in the user prompt. If the webpage explicitly states a registration deadline or event date that has ALREADY PASSED relative to today's date, you MUST set "is_opportunity": false.`;
 
 // ── Visited links tracking ──
 
@@ -89,7 +90,7 @@ function saveVisitedLinks(visited: Set<string>): void {
 
 async function extractFromWebpage(text: string, sourceUrl: string): Promise<GeminiExtraction | null> {
   try {
-    const userPrompt = `WEBPAGE URL: ${sourceUrl}\n\nWEBPAGE TEXT:\n${text.substring(0, 15000)}\n\nAnalyze this webpage and extract opportunity information.`;
+    const userPrompt = `TODAY'S DATE: ${new Date().toDateString()}\n\nWEBPAGE URL: ${sourceUrl}\n\nWEBPAGE TEXT:\n${text.substring(0, 15000)}\n\nAnalyze this webpage and extract opportunity information.`;
 
     const response = await groq.chat.completions.create({
       model: 'llama-3.1-8b-instant',
