@@ -51,9 +51,10 @@ Return ONLY valid JSON in this exact format, with no additional text, markdown, 
   "rewards": "Prizes, stipends, certificates, swag, or monetary rewards"
 }
 
-If the text is NOT about a student opportunity (e.g., it's a Terms of Service, Privacy Policy, blog post, product review, news), return:
+If the webpage is NOT about a student opportunity (e.g., it's a tutorial, vlog, product review, news, OR the deadline has already passed), return:
 {
   "is_opportunity": false,
+  "rejection_reason": "Briefly explain why this was rejected (e.g., 'Deadline passed', 'Not an opportunity', 'No registration link found')",
   "opportunity_name": "",
   "organizer": "",
   "registration_link": "",
@@ -262,7 +263,8 @@ async function scrapeSource(
             sourceName: source.source_name,
           });
         } else {
-          log.info('    🗑️ Rejected (not an opportunity)');
+          const reason = (extraction as any)?.rejection_reason || 'not an opportunity';
+          log.info(`    🗑️ Rejected: ${reason}`);
         }
 
         visitedLinks.add(eventUrl);
