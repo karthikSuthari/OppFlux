@@ -31,3 +31,10 @@ Thumbs.db
 .pm2/
 .env.save
 test-groq.js
+# Runtime data
+.env.backup
+data/pending_opportunities.json
+data/visited_links.json
+
+# Logs
+*.log

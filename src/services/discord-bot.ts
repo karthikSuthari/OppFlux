@@ -58,8 +58,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
             deletePendingOpportunity(messageId);
             
             await reaction.message.edit(`✅ **APPROVED & SAVED**\n\n${reaction.message.content}`);
-            await reaction.message.reactions.removeAll();
-        } else if (emoji === '❌') {
+         } else if (emoji === '❌') {
             console.log(`Rejecting opportunity: ${opportunity.opportunity_name}`);
             deletePendingOpportunity(messageId);
             
@@ -104,4 +103,4 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
     }
 });
 
-discordClient.login(config.discordBotToken);
+discordClient.login(config.discordBotToken);

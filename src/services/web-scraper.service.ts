@@ -145,21 +145,39 @@ async function scrapeSource(
 
   try {
     const page = await browser.newPage();
-    await page.setUserAgent(
+await page.setRequestInterception(true);
+
+page.on('request', req => {
+  const type = req.resourceType();
+
+  if (
+    type === 'image' ||
+    type === 'media' ||
+    type === 'font'
+  ) {
+    req.abort();
+  } else {
+    req.continue();
+  }
+});    
+await page.setUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
 
     // 1. Find event links on the listing page
     log.info('  Searching for event links...');
-    await page.goto(source.source_url, { waitUntil: 'networkidle2', timeout: 45000 });
-    await page.evaluate('window.scrollBy(0, document.body.scrollHeight / 2)');
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+   await page.goto(source.source_url, {
+    waitUntil: 'domcontentloaded',
+    timeout: 15000
+});
+await page.evaluate('window.scrollBy(0,500)');
+await new Promise(resolve => setTimeout(resolve, 500));
 
     // Get links WITH their text (for filter matching)
     const rawLinkData: { href: string; text: string }[] = await page.evaluate(`
       (() => {
         const results = [];
-        document.querySelectorAll('a').forEach((a) => {
+        document.querySelectorAll('a[href]').forEach((a) => {
           const title = a.innerText.trim();
           const href = a.href;
           if (title.length > 10 && href && href.startsWith('http')) {
@@ -187,15 +205,19 @@ async function scrapeSource(
     log.info(`  Found ${newLinks.length} NEW links after filter (${uniqueLinks.length} total unique, ${filteredLinks.length} matched filter, ${uniqueLinks.length - filteredLinks.length} filtered out)`);
 
     // 2. Deep-visit each new link (limit to 5 per source for RAM)
-    const limit = Math.min(newLinks.length, 5);
+    const limit = Math.min(newLinks.length, 2);
     for (let i = 0; i < limit; i++) {
       const eventUrl = newLinks[i].href;
       log.info(`  [${i + 1}/${limit}] Visiting: ${eventUrl}`);
 
       try {
-        await page.goto(eventUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-        const pageText = await page.evaluate('document.body.innerText') as string;
-
+        await page.goto(eventUrl, {
+    waitUntil: 'domcontentloaded',
+    timeout: 80000
+});
+const pageText = await page.evaluate(
+  'document.body.innerText.slice(0,15000)'
+) as string;
         if (pageText.length < 100) {
           log.info('    ⚠️ Too little text, skipping.');
           visitedLinks.add(eventUrl);
