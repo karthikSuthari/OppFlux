@@ -178,9 +178,15 @@ await new Promise(resolve => setTimeout(resolve, 500));
       (() => {
         const results = [];
         document.querySelectorAll('a[href]').forEach((a) => {
-          const title = a.innerText.trim();
+          // Grab text, or if it's an image link, try to grab alt text or just use a generic title
+          let title = a.innerText.trim();
+          if (!title) {
+             const img = a.querySelector('img');
+             title = img ? (img.alt || 'Image Link') : 'Card Link';
+          }
           const href = a.href;
-          if (title.length > 10 && href && href.startsWith('http')) {
+          // Accept any link that has a valid http url, removing the strict text length requirement
+          if (href && href.startsWith('http') && !href.includes('login') && !href.includes('signup')) {
             results.push({ href, text: title });
           }
         });
