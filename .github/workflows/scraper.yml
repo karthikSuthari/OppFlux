@@ -25,6 +25,14 @@ jobs:
       - name: Install Puppeteer Browsers
         run: npx puppeteer browsers install
 
+      - name: Restore Scraper State
+        uses: actions/cache/restore@v4
+        with:
+          path: data/
+          key: scraper-state-${{ github.run_id }}
+          restore-keys: |
+            scraper-state-
+
       - name: Run Web Scraper
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -37,10 +45,9 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: npm run scrape
         
-      - name: Commit Updated Visited Links
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add data/visited_links.json
-          # Only commit and push if there are changes
-          git diff-index --quiet HEAD || (git commit -m "chore: update visited links [skip ci]" && git push)
+      - name: Save Scraper State
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: scraper-state-${{ github.run_id }}
