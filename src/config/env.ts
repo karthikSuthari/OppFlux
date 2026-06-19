@@ -89,12 +89,14 @@ function loadConfig(): AppConfig {
       10
     ),
 
-    telegramBotToken: requireEnv(
-      'TELEGRAM_BOT_TOKEN'
+    telegramBotToken: optionalEnv(
+      'TELEGRAM_BOT_TOKEN',
+      ''
     ),
 
-    telegramChatId: requireEnv(
-      'TELEGRAM_CHAT_ID'
+    telegramChatId: optionalEnv(
+      'TELEGRAM_CHAT_ID',
+      ''
     ),
 
     discordWebhookUrl: optionalEnv(

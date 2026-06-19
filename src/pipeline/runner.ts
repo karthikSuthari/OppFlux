@@ -221,7 +221,8 @@ export async function runPipeline(): Promise<PipelineRunSummary> {
     }
 
     // Step 4: Web Scraping
-    log.info('\nStep 4: Running web scraper...');
+    log.info('\nStep 4: Web scraper is now handled by GitHub Actions to save memory.');
+    /*
     try {
       const scrapedOpportunities = await runWebScraper();
       log.info(`Web scraper returned ${scrapedOpportunities.length} opportunities`);
@@ -243,6 +244,7 @@ export async function runPipeline(): Promise<PipelineRunSummary> {
       summary.errors++;
       summary.errorDetails.push(`Web Scraper: ${errMsg}`);
     }
+    */
 
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -524,7 +526,7 @@ async function processVideo(
  * Process a single scraped opportunity through the same pipeline as YouTube:
  * Duplicate check → Content generation → Image generation → Discord review
  */
-async function processScrapedOpportunity(
+export async function processScrapedOpportunity(
   extraction: GeminiExtraction,
   sourceUrl: string,
   sourceName: string,

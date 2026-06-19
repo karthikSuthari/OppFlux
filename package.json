@@ -14,7 +14,8 @@
     "pipeline:dry-run": "DRY_RUN=true tsx src/index.ts",
     "webhook:register": "tsx src/scripts/register-webhook.ts",
     "webhook:status": "tsx src/scripts/webhook-status.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "scrape": "tsx src/scripts/run-scraper.ts"
   },
   "keywords": [
     "youtube",
@@ -37,6 +38,7 @@
     "google-spreadsheet": "^5.3.0",
     "groq-sdk": "^1.2.1",
     "gtoken": "^8.0.0",
+    "node-cron": "^4.4.1",
     "puppeteer": "^25.1.0",
     "rss-parser": "^3.13.0",
     "uuid": "^11.1.0",
@@ -46,6 +48,7 @@
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.15.0",
+    "@types/node-cron": "^3.0.11",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
