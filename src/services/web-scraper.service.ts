@@ -204,8 +204,8 @@ await new Promise(resolve => setTimeout(resolve, 500));
 
     log.info(`  Found ${newLinks.length} NEW links after filter (${uniqueLinks.length} total unique, ${filteredLinks.length} matched filter, ${uniqueLinks.length - filteredLinks.length} filtered out)`);
 
-    // 2. Deep-visit each new link (limit to 5 per source for RAM)
-    const limit = Math.min(newLinks.length, 2);
+    // 2. Deep-visit each new link (process up to 20 per source)
+    const limit = Math.min(newLinks.length, 20);
     for (let i = 0; i < limit; i++) {
       const eventUrl = newLinks[i].href;
       log.info(`  [${i + 1}/${limit}] Visiting: ${eventUrl}`);
