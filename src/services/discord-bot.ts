@@ -83,7 +83,17 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
             console.log(`Rejecting opportunity: ${opportunity.opportunity_name}`);
             deletePendingOpportunity(messageId);
             
-            await reaction.message.edit(`❌ **REJECTED**\n\n${reaction.message.content}`);
+            // If it exists in Google Sheets, change status to 'rejected' so the scraper never adds it again
+            const existingOpp = await sheetsService.getOpportunityById(opportunity.id);
+            if (existingOpp) {
+                await sheetsService.updateOpportunityStatus(opportunity.id, 'rejected');
+            }
+            
+            // Clean up the message text to remove any previous APPROVED prefixes
+            let originalContent = reaction.message.content || '';
+            originalContent = originalContent.replace(/^✅ \*\*APPROVED & SAVED\*\*\n\n/, '');
+            
+            await reaction.message.edit(`❌ **REJECTED / UNAPPROVED**\n\n${originalContent}`);
             await reaction.message.reactions.removeAll();
         } else if (emoji === '🔄') {
             console.log(`Regenerating opportunity: ${opportunity.opportunity_name}`);
