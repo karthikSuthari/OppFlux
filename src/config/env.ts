@@ -154,6 +154,16 @@ function loadConfig(): AppConfig {
     .replace(/\\\\n/g, '\n') // Replace double-escaped newlines just in case
     .trim();
 
+  // Safe debugging to figure out what's wrong with the key in GitHub
+  console.log('--- KEY DEBUG INFO ---');
+  console.log('Key length:', config.googlePrivateKey.length);
+  console.log('Starts with BEGIN:', config.googlePrivateKey.startsWith('-----BEGIN PRIVATE KEY-----'));
+  console.log('Ends with END:', config.googlePrivateKey.endsWith('-----END PRIVATE KEY-----'));
+  console.log('Contains literal \\n:', config.googlePrivateKey.includes('\\n'));
+  console.log('Contains real newlines:', config.googlePrivateKey.includes('\n'));
+  console.log('Number of real newlines:', (config.googlePrivateKey.match(/\n/g) || []).length);
+  console.log('----------------------');
+
   return config;
 }
 
