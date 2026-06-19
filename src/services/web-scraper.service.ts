@@ -166,12 +166,16 @@ await page.setUserAgent(
 
     // 1. Find event links on the listing page
     log.info('  Searching for event links...');
-   await page.goto(source.source_url, {
-    waitUntil: 'domcontentloaded',
-    timeout: 15000
-});
-await page.evaluate('window.scrollBy(0,500)');
-await new Promise(resolve => setTimeout(resolve, 500));
+    await page.goto(source.source_url, {
+      waitUntil: 'networkidle2', // Wait for React/APIs to load
+      timeout: 30000
+    });
+    
+    // Scroll down multiple times to trigger lazy-loaded cards
+    for (let s = 0; s < 3; s++) {
+      await page.evaluate('window.scrollBy(0, 1000)');
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
 
     // Get links WITH their text (for filter matching)
     const rawLinkData: { href: string; text: string }[] = await page.evaluate(`
