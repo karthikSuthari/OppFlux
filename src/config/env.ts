@@ -148,21 +148,23 @@ function loadConfig(): AppConfig {
     process.exit(1);
   }
 
-  config.googlePrivateKey = config.googlePrivateKey
-    .replace(/^"|"$/g, '') // Remove surrounding quotes
-    .replace(/\\n/g, '\n') // Replace literal \n with real newlines
-    .replace(/\\\\n/g, '\n') // Replace double-escaped newlines just in case
-    .trim();
+  // Force perfectly formatted PEM key by reconstructing it from scratch
+  // This solves the issue where GitHub Secrets collapses the key into a single line with spaces
+  let keyBody = config.googlePrivateKey
+    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+    .replace(/-----END PRIVATE KEY-----/g, '')
+    .replace(/\\n/g, '')
+    .replace(/"/g, '')
+    .replace(/\s+/g, ''); // Remove all spaces and newlines
 
-  // Safe debugging to figure out what's wrong with the key in GitHub
-  console.log('--- KEY DEBUG INFO ---');
-  console.log('Key length:', config.googlePrivateKey.length);
-  console.log('Starts with BEGIN:', config.googlePrivateKey.startsWith('-----BEGIN PRIVATE KEY-----'));
-  console.log('Ends with END:', config.googlePrivateKey.endsWith('-----END PRIVATE KEY-----'));
-  console.log('Contains literal \\n:', config.googlePrivateKey.includes('\\n'));
-  console.log('Contains real newlines:', config.googlePrivateKey.includes('\n'));
-  console.log('Number of real newlines:', (config.googlePrivateKey.match(/\n/g) || []).length);
-  console.log('----------------------');
+  // Re-split the body into 64-character chunks which OpenSSL requires
+  const chunks = [];
+  for (let i = 0; i < keyBody.length; i += 64) {
+    chunks.push(keyBody.substring(i, i + 64));
+  }
+
+  // Reconstruct the perfect PEM format
+  config.googlePrivateKey = `-----BEGIN PRIVATE KEY-----\n${chunks.join('\n')}\n-----END PRIVATE KEY-----\n`;
 
   return config;
 }
