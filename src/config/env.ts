@@ -148,11 +148,11 @@ function loadConfig(): AppConfig {
     process.exit(1);
   }
 
-  config.googlePrivateKey =
-    config.googlePrivateKey.replace(
-      /\\n/g,
-      '\n'
-    );
+  config.googlePrivateKey = config.googlePrivateKey
+    .replace(/^"|"$/g, '') // Remove surrounding quotes
+    .replace(/\\n/g, '\n') // Replace literal \n with real newlines
+    .replace(/\\\\n/g, '\n') // Replace double-escaped newlines just in case
+    .trim();
 
   return config;
 }
