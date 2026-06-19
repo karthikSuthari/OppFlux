@@ -602,7 +602,7 @@ export async function processScrapedOpportunity(
 
       if (messageId) {
         // Immediately save to Sheets as pending so the Oracle server can find it
-        opportunity.status = 'pending';
+        opportunity.status = 'pending_review';
         content.telegram_message_id = messageId;
         content.content_status = 'pending_review';
         
