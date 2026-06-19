@@ -601,9 +601,18 @@ export async function processScrapedOpportunity(
       );
 
       if (messageId) {
+        // Immediately save to Sheets as pending so the Oracle server can find it
+        opportunity.status = 'pending';
+        content.telegram_message_id = messageId;
+        content.content_status = 'pending_review';
+        
+        await sheetsService.addOpportunity(opportunity);
+        await sheetsService.addContent(content);
+        
+        // Save locally just in case
         savePendingOpportunity(messageId, opportunity, content);
         summary.telegramSent++;
-        log.info('  📢 Discord review message sent, awaiting reaction');
+        log.info('  📢 Discord review message sent & saved to Sheets as pending');
       } else {
         log.warn('  ⚠️ Failed to send Discord review message');
       }

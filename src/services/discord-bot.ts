@@ -41,7 +41,22 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
     }
 
     const messageId = reaction.message.id;
-    const pendingData = getPendingOpportunity(messageId);
+    let pendingData = getPendingOpportunity(messageId);
+    
+    // If not found in local JSON (because it was scraped on GitHub Actions), fetch from Google Sheets
+    if (!pendingData) {
+        try {
+            const contentInfo = await sheetsService.getContentByTelegramMessageId(messageId);
+            if (contentInfo) {
+                const oppInfo = await sheetsService.getOpportunityById(contentInfo.opportunity_id);
+                if (oppInfo) {
+                    pendingData = { opportunity: oppInfo, content: contentInfo };
+                }
+            }
+        } catch (err) {
+            console.error('Error fetching from Sheets:', err);
+        }
+    }
     
     if (!pendingData) return;
 
@@ -51,8 +66,14 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
     try {
         if (emoji === '✅') {
             console.log(`Approving opportunity: ${opportunity.opportunity_name}`);
-            await sheetsService.addOpportunity(opportunity);
-            await sheetsService.addContent(content);
+            
+            // Check if it's already in Sheets (it will be if scraped from web)
+            const existingOpp = await sheetsService.getOpportunityById(opportunity.id);
+            if (!existingOpp) {
+                await sheetsService.addOpportunity(opportunity);
+                await sheetsService.addContent(content);
+            }
+            
             await sheetsService.updateOpportunityStatus(opportunity.id, 'approved');
             
             deletePendingOpportunity(messageId);

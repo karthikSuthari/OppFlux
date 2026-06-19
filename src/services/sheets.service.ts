@@ -296,6 +296,34 @@ export async function getContentByOpportunityId(opportunityId: string): Promise<
 }
 
 /**
+ * Get content row by telegram_message_id
+ */
+export async function getContentByTelegramMessageId(messageId: string): Promise<Content | null> {
+  if (!doc) throw new Error('Sheets not initialized');
+
+  const sheet = doc.sheetsByTitle[TABS.CONTENT];
+  if (!sheet) throw new Error(`Tab "${TABS.CONTENT}" not found`);
+
+  const rows = await sheet.getRows();
+  const row = rows.find((r: GoogleSpreadsheetRow) => r.get('telegram_message_id') === messageId);
+
+  if (!row) return null;
+
+  return {
+    opportunity_id: row.get('opportunity_id') || '',
+    caption: row.get('caption') || '',
+    hashtags: row.get('hashtags') || '',
+    image_prompt: row.get('image_prompt') || '',
+    image_url: row.get('image_url') || '',
+    content_status: row.get('content_status') || 'draft',
+    telegram_message_id: row.get('telegram_message_id') || '',
+    review_status: row.get('review_status') || '',
+    reviewed_at: row.get('reviewed_at') || '',
+    reviewed_by: row.get('reviewed_by') || '',
+  };
+}
+
+/**
  * Update content review fields (status, timestamp, reviewer)
  */
 export async function updateContentReview(
