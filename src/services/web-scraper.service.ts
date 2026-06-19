@@ -146,23 +146,23 @@ async function scrapeSource(
 
   try {
     const page = await browser.newPage();
-await page.setRequestInterception(true);
+    await page.setRequestInterception(true);
 
-page.on('request', req => {
-  const type = req.resourceType();
+    page.on('request', req => {
+      const type = req.resourceType();
 
-  if (
-    type === 'image' ||
-    type === 'media' ||
-    type === 'font'
-  ) {
-    req.abort();
-  } else {
-    req.continue();
-  }
-});    
-await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      if (
+        type === 'image' ||
+        type === 'media' ||
+        type === 'font'
+      ) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+    await page.setUserAgent(
+      'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
     );
 
     // 1. Find event links on the listing page
@@ -171,7 +171,7 @@ await page.setUserAgent(
       waitUntil: 'networkidle2', // Wait for React/APIs to load
       timeout: 30000
     });
-    
+
     // Scroll down multiple times to trigger lazy-loaded cards
     for (let s = 0; s < 3; s++) {
       await page.evaluate('window.scrollBy(0, 1000)');
@@ -223,12 +223,12 @@ await page.setUserAgent(
 
       try {
         await page.goto(eventUrl, {
-    waitUntil: 'domcontentloaded',
-    timeout: 80000
-});
-const pageText = await page.evaluate(
-  'document.body.innerText.slice(0,15000)'
-) as string;
+          waitUntil: 'networkidle2',
+          timeout: 80000
+        });
+        const pageText = await page.evaluate(
+          'document.body.innerText.slice(0,15000)'
+        ) as string;
         if (pageText.length < 100) {
           log.info('    ⚠️ Too little text, skipping.');
           visitedLinks.add(eventUrl);
