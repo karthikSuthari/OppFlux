@@ -33,7 +33,10 @@ Return ONLY valid JSON in this exact format, with no additional text, markdown, 
   "deadline": "Application deadline if mentioned",
   "eligibility": "Who can apply (students, graduates, etc.)",
   "benefits": "What participants get (learning, experience, etc.)",
-  "rewards": "Prizes, stipends, certificates, swag, or monetary rewards"
+  "rewards": "Prizes, stipends, certificates, swag, or monetary rewards",
+  "mode": "Online, Offline, or Hybrid",
+  "location": "City/State/Venue or Virtual Platform",
+  "fees": "Entry fee, Paid, or Free"
 }
 
 If the video is NOT about a student opportunity (e.g., it's a tutorial, vlog, product review, news), return:
@@ -45,7 +48,10 @@ If the video is NOT about a student opportunity (e.g., it's a tutorial, vlog, pr
   "deadline": "",
   "eligibility": "",
   "benefits": "",
-  "rewards": ""
+  "rewards": "",
+  "mode": "",
+  "location": "",
+  "fees": ""
 }
 
 IMPORTANT RULES:

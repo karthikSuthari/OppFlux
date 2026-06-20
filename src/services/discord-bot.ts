@@ -107,6 +107,9 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
                 deadline: opportunity.deadline,
                 eligibility: opportunity.eligibility,
                 rewards: opportunity.rewards,
+                mode: opportunity.mode,
+                location: opportunity.location,
+                fees: opportunity.fees,
                 benefits: ''
             }, opportunity.source_video);
 
@@ -119,7 +122,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
                 const { savePendingOpportunity } = await import('./pending-store.service.js');
                 savePendingOpportunity(messageId, opportunity, content);
 
-                const newText = `📋 **${opportunity.opportunity_name}**\n🏢 Organizer: ${opportunity.organizer}\n📅 Deadline: ${opportunity.deadline}\n🎓 Eligibility: ${opportunity.eligibility}\n🏆 Rewards: ${opportunity.rewards}\n\n🔗 Registration: ${opportunity.registration_link}\n📺 Source: ${opportunity.source_video}\n\n━━━━━━━━━━━━━━\n\n${content.caption}`;
+                const newText = `📋 **${opportunity.opportunity_name}**\n🏢 Organizer: ${opportunity.organizer}\n📍 Location: ${opportunity.location}\n🖥️ Mode: ${opportunity.mode}\n💰 Fees: ${opportunity.fees}\n📅 Deadline: ${opportunity.deadline}\n🎓 Eligibility: ${opportunity.eligibility}\n🏆 Rewards: ${opportunity.rewards}\n\n🔗 Registration: ${opportunity.registration_link}\n📺 Source: ${opportunity.source_video}\n\n━━━━━━━━━━━━━━\n\n${content.caption}`;
                 await reaction.message.edit(newText);
                 
                 // Remove the user's reaction so they can click it again

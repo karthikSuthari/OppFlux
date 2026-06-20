@@ -406,8 +406,11 @@ function opportunityToExtraction(opp: Opportunity): GeminiExtraction {
     registration_link: opp.registration_link,
     deadline: opp.deadline,
     eligibility: opp.eligibility,
-    benefits: '', // Not stored in Sheets
     rewards: opp.rewards,
+    mode: (opp as any).mode || '',
+    location: (opp as any).location || '',
+    fees: (opp as any).fees || '',
+    benefits: '',
   };
 }
 

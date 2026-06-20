@@ -443,7 +443,10 @@ async function processVideo(
     deadline: extraction.deadline,
     eligibility: extraction.eligibility,
     rewards: extraction.rewards,
-    source_video: video.link,
+    mode: extraction.mode || '',
+    location: extraction.location || '',
+    fees: extraction.fees || '',
+    source_video: `https://youtube.com/watch?v=${video.videoId}`,
     source_channel: video.channelName,
     status: 'new',
     created_at: new Date().toISOString(),
@@ -504,7 +507,7 @@ async function processVideo(
 
     try {
       const messageId = await sendDiscordReviewMessage(
-        `📋 **${opportunity.opportunity_name}**\n🏢 Organizer: ${opportunity.organizer}\n📅 Deadline: ${opportunity.deadline}\n🎓 Eligibility: ${opportunity.eligibility}\n🏆 Rewards: ${opportunity.rewards}\n\n🔗 Registration: ${opportunity.registration_link}\n📺 Source: ${opportunity.source_video}\n\n━━━━━━━━━━━━━━\n\n${content.caption}`
+        `📋 **${opportunity.opportunity_name}**\n🏢 Organizer: ${opportunity.organizer}\n📍 Location: ${opportunity.location}\n🖥️ Mode: ${opportunity.mode}\n💰 Fees: ${opportunity.fees}\n📅 Deadline: ${opportunity.deadline}\n🎓 Eligibility: ${opportunity.eligibility}\n🏆 Rewards: ${opportunity.rewards}\n\n🔗 Registration: ${opportunity.registration_link}\n📺 Source: ${opportunity.source_video}\n\n━━━━━━━━━━━━━━\n\n${content.caption}`
       );
 
       if (messageId) {
@@ -552,6 +555,9 @@ export async function processScrapedOpportunity(
     deadline: extraction.deadline,
     eligibility: extraction.eligibility,
     rewards: extraction.rewards,
+    mode: extraction.mode || '',
+    location: extraction.location || '',
+    fees: extraction.fees || '',
     source_video: sourceUrl,
     source_channel: sourceName,
     status: 'new',
@@ -597,7 +603,7 @@ export async function processScrapedOpportunity(
     log.info('  📢 Sending to Discord for review...');
     try {
       const messageId = await sendDiscordReviewMessage(
-        `🌐 **[WEB] ${opportunity.opportunity_name}**\n🏢 Organizer: ${opportunity.organizer}\n📅 Deadline: ${opportunity.deadline}\n🎓 Eligibility: ${opportunity.eligibility}\n🏆 Rewards: ${opportunity.rewards}\n\n🔗 Registration: ${opportunity.registration_link}\n📺 Source: ${opportunity.source_video}\n\n━━━━━━━━━━━━━━\n\n${content.caption}`
+        `🌐 **[WEB] ${opportunity.opportunity_name}**\n🏢 Organizer: ${opportunity.organizer}\n📍 Location: ${opportunity.location}\n🖥️ Mode: ${opportunity.mode}\n💰 Fees: ${opportunity.fees}\n📅 Deadline: ${opportunity.deadline}\n🎓 Eligibility: ${opportunity.eligibility}\n🏆 Rewards: ${opportunity.rewards}\n\n🔗 Registration: ${opportunity.registration_link}\n📺 Source: ${opportunity.source_video}\n\n━━━━━━━━━━━━━━\n\n${content.caption}`
       );
 
       if (messageId) {

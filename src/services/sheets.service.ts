@@ -26,7 +26,7 @@ const HEADERS = {
   [TABS.SCRAPING_SOURCES]: ['source_name', 'source_url', 'filter', 'active'],
   [TABS.OPPORTUNITIES]: [
     'id', 'opportunity_name', 'organizer', 'registration_link',
-    'deadline', 'eligibility', 'rewards', 'source_video',
+    'deadline', 'eligibility', 'rewards', 'mode', 'location', 'fees', 'source_video',
     'source_channel', 'status', 'created_at',
   ],
   [TABS.CONTENT]: [
@@ -167,6 +167,9 @@ export async function getExistingOpportunities(): Promise<Opportunity[]> {
     deadline: row.get('deadline') || '',
     eligibility: row.get('eligibility') || '',
     rewards: row.get('rewards') || '',
+    mode: row.get('mode') || '',
+    location: row.get('location') || '',
+    fees: row.get('fees') || '',
     source_video: row.get('source_video') || '',
     source_channel: row.get('source_channel') || '',
     status: row.get('status') || 'new',
@@ -200,6 +203,9 @@ export async function addOpportunity(opportunity: Opportunity): Promise<void> {
       deadline: opportunity.deadline,
       eligibility: opportunity.eligibility,
       rewards: opportunity.rewards,
+      mode: opportunity.mode,
+      location: opportunity.location,
+      fees: opportunity.fees,
       source_video: opportunity.source_video,
       source_channel: opportunity.source_channel,
       status: opportunity.status,

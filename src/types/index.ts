@@ -45,6 +45,9 @@ export interface Opportunity {
   deadline: string;
   eligibility: string;
   rewards: string;
+  mode: string;
+  location: string;
+  fees: string;
   source_video: string;
   source_channel: string;
   status: OpportunityStatus;
@@ -101,6 +104,9 @@ export interface GeminiExtraction {
   eligibility: string;
   benefits: string;
   rewards: string;
+  mode: string;
+  location: string;
+  fees: string;
 }
 
 /**
