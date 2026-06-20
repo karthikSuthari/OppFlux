@@ -94,7 +94,7 @@ async function extractFromWebpage(text: string, sourceUrl: string): Promise<Gemi
     const userPrompt = `TODAY'S DATE: ${new Date().toDateString()}\n\nWEBPAGE URL: ${sourceUrl}\n\nWEBPAGE TEXT:\n${text.substring(0, 15000)}\n\nAnalyze this webpage and extract opportunity information.`;
 
     const response = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: 'llama-3.3-70b-versatile',
       temperature: 0.1,
       messages: [{ role: 'user', content: EXTRACTION_PROMPT + '\n\n' + userPrompt }],
     });

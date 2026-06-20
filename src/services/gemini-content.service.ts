@@ -84,7 +84,7 @@ Create engaging, professional Instagram content for this opportunity.`;
     const response = await withRetry(
       async () => {
       const result = await groq.chat.completions.create({
-  model: 'llama-3.1-8b-instant',
+  model: 'llama-3.3-70b-versatile',
   temperature: 0.7,
  response_format: {
     type: 'json_object'
