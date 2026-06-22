@@ -22,7 +22,7 @@ const VISITED_FILE = path.join(DATA_DIR, 'visited_links.json');
 const FAILED_FILE = path.join(DATA_DIR, 'failed_links.json');
 
 // Limits
-const MAX_LINKS_PER_SOURCE = 20;
+const MAX_LINKS_PER_SOURCE = 40;
 const MAX_VISITED_LINKS = 5000; // Prune beyond this
 const VISITED_TTL_DAYS = 30; // Drop entries older than 30 days
 const MAX_FAIL_RETRIES = 3;
@@ -244,6 +244,176 @@ function matchesFilter(url: string, linkText: string, filter: string): boolean {
   return url.toLowerCase().includes(keyword) || linkText.toLowerCase().includes(keyword);
 }
 
+// ── Page interaction helpers ──
+
+/**
+ * Dismiss cookie consent popups, overlays, and banners that block page interaction.
+ * Tries common button selectors — fails silently if none found.
+ */
+async function dismissPopups(page: import('puppeteer').Page): Promise<void> {
+  const dismissSelectors = [
+    // Cookie consent buttons
+    'button[id*="accept"]',
+    'button[id*="cookie"]',
+    'button[class*="accept"]',
+    'button[class*="consent"]',
+    'a[id*="accept"]',
+    // Generic dismiss patterns
+    '[aria-label="Close"]',
+    '[aria-label="Dismiss"]',
+    'button[class*="close"]',
+    '.cookie-banner button',
+    '.consent-banner button',
+    '#onetrust-accept-btn-handler',
+    '.cc-btn.cc-dismiss',
+  ];
+
+  for (const selector of dismissSelectors) {
+    try {
+      const btn = await page.$(selector);
+      if (btn) {
+        await btn.click();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        log.info('  🍪 Dismissed popup/cookie banner');
+        break;
+      }
+    } catch {
+      // Ignore — button might not be interactable
+    }
+  }
+}
+
+/**
+ * Aggressively expand ALL content on a listing page:
+ * 1. Scrolls to absolute bottom of the page (tracks scroll height)
+ * 2. Clicks "Load More" / "Show More" / "View All" / pagination buttons
+ * 3. Repeats until no new content loads or max rounds reached
+ *
+ * This handles: infinite scroll, "load more" buttons, lazy-loaded cards,
+ * and paginated event listings.
+ */
+async function expandAllContent(page: import('puppeteer').Page): Promise<void> {
+  const MAX_EXPAND_ROUNDS = 20;
+  const SCROLL_PAUSE_MS = 2000;
+
+  // Selectors for "Load More" / "Show More" type buttons (case-insensitive via XPath)
+  const loadMoreXPaths = [
+    '//button[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "load more")]',
+    '//button[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "show more")]',
+    '//button[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "view more")]',
+    '//button[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "view all")]',
+    '//button[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "see more")]',
+    '//button[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "see all")]',
+    '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "load more")]',
+    '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "show more")]',
+    '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "view more")]',
+    '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "view all")]',
+    '//a[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "see all")]',
+    // CSS selectors for common class patterns
+  ];
+
+  const loadMoreCSSSelectors = [
+    'button[class*="load-more"]',
+    'button[class*="loadmore"]',
+    'button[class*="show-more"]',
+    'button[class*="showmore"]',
+    'a[class*="load-more"]',
+    'a[class*="show-more"]',
+    '.load-more',
+    '.show-more',
+    '.pagination a[class*="next"]',
+    'a[aria-label="Next"]',
+    'button[aria-label="Next"]',
+    'a[rel="next"]',
+  ];
+
+  let previousHeight = 0;
+  let staleRounds = 0;
+
+  for (let round = 0; round < MAX_EXPAND_ROUNDS; round++) {
+    // Step 1: Scroll to the absolute bottom
+    const currentHeight = await page.evaluate('document.body.scrollHeight') as number;
+    await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+    await new Promise(resolve => setTimeout(resolve, SCROLL_PAUSE_MS));
+
+    // Step 2: Try clicking a "Load More" button
+    let clicked = false;
+
+    // Try XPath selectors (case-insensitive text match)
+    for (const xpath of loadMoreXPaths) {
+      try {
+        const btn = await page.waitForSelector(`::-p-xpath(${xpath})`, { timeout: 500 });
+        if (btn) {
+          const isVisible = await btn.evaluate(`
+            (() => {
+              const rect = this.getBoundingClientRect();
+              const style = window.getComputedStyle(this);
+              return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+            })()
+          `) as boolean;
+          if (isVisible) {
+            await btn.click();
+            clicked = true;
+            log.info(`  📄 Clicked "Load More" button (round ${round + 1})`);
+            await new Promise(resolve => setTimeout(resolve, SCROLL_PAUSE_MS));
+            break;
+          }
+        }
+      } catch {
+        // Button not found or not clickable — try next
+      }
+    }
+
+    // Try CSS selectors if XPath didn't find anything
+    if (!clicked) {
+      for (const selector of loadMoreCSSSelectors) {
+        try {
+          const btn = await page.$(selector);
+          if (btn) {
+            const isVisible = await btn.evaluate(`
+              (() => {
+                const rect = this.getBoundingClientRect();
+                const style = window.getComputedStyle(this);
+                return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+              })()
+            `) as boolean;
+            if (isVisible) {
+              await btn.click();
+              clicked = true;
+              log.info(`  📄 Clicked load-more element (round ${round + 1})`);
+              await new Promise(resolve => setTimeout(resolve, SCROLL_PAUSE_MS));
+              break;
+            }
+          }
+        } catch {
+          // Not clickable — try next
+        }
+      }
+    }
+
+    // Step 3: Check if new content was loaded
+    const newHeight = await page.evaluate('document.body.scrollHeight') as number;
+
+    if (newHeight === previousHeight && !clicked) {
+      staleRounds++;
+      if (staleRounds >= 3) {
+        log.info(`  ✅ Page fully expanded after ${round + 1} rounds (no new content in ${staleRounds} rounds)`);
+        break;
+      }
+    } else {
+      staleRounds = 0;
+    }
+
+    previousHeight = newHeight;
+  }
+
+  // Final scroll back to top and then to bottom to ensure everything rendered
+  await page.evaluate('window.scrollTo(0, 0)');
+  await new Promise(resolve => setTimeout(resolve, 500));
+  await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+}
+
 // ── Scrape a single source ──
 
 async function scrapeSource(
@@ -298,32 +468,32 @@ async function scrapeSource(
     });
     await page.setUserAgent(USER_AGENT);
 
-    // 1. Find event links on the listing page
-    log.info('  Searching for event links...');
+    // 1. Navigate to the listing page
+    log.info('  Navigating to listing page...');
     await page.goto(source.source_url, {
       waitUntil: 'networkidle2',
       timeout: PAGE_TIMEOUT_MS,
     });
 
-    // Scroll down multiple times to trigger lazy-loaded cards
-    for (let s = 0; s < 3; s++) {
-      await page.evaluate('window.scrollBy(0, 1000)');
-      await new Promise(resolve => setTimeout(resolve, 1500));
-    }
+    // 1a. Dismiss cookie consent / popup overlays that block interaction
+    await dismissPopups(page);
 
-    // Get links WITH their text (for filter matching)
+    // 1b. Aggressively scroll and click "Load More" to reveal ALL events
+    log.info('  Expanding all events (scroll + click "Load More")...');
+    await expandAllContent(page);
+
+    // 2. Extract all links from the fully-expanded page
+    log.info('  Extracting event links...');
     const rawLinkData: { href: string; text: string }[] = await page.evaluate(`
       (() => {
         const results = [];
         document.querySelectorAll('a[href]').forEach((a) => {
-          // Grab text, or if it's an image link, try to grab alt text or just use a generic title
           let title = a.innerText.trim();
           if (!title) {
              const img = a.querySelector('img');
              title = img ? (img.alt || 'Image Link') : 'Card Link';
           }
           const href = a.href;
-          // Accept any link that has a valid http url, removing the strict text length requirement
           if (href && href.startsWith('http') && !href.includes('login') && !href.includes('signup')) {
             results.push({ href, text: title });
           }
@@ -365,6 +535,15 @@ async function scrapeSource(
           waitUntil: 'networkidle2',
           timeout: PAGE_TIMEOUT_MS,
         });
+
+        // Scroll the detail page to load lazy content (registration forms, dates, etc.)
+        for (let s = 0; s < 5; s++) {
+          await page.evaluate('window.scrollBy(0, 800)');
+          await new Promise(resolve => setTimeout(resolve, 800));
+        }
+        await page.evaluate('window.scrollTo(0, 0)'); // Back to top for full text capture
+        await new Promise(resolve => setTimeout(resolve, 500));
+
         const pageText = await page.evaluate(
           'document.body.innerText.slice(0,15000)'
         ) as string;
