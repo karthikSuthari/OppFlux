@@ -4,9 +4,12 @@ import {
     Partials
 } from 'discord.js';
 import { config } from '../config/env.js';
+import { createServiceLogger } from '../utils/logger.js';
 import { getPendingOpportunity, deletePendingOpportunity } from './pending-store.service.js';
 import * as sheetsService from './sheets.service.js';
 import { generateContent } from './gemini-content.service.js';
+
+const log = createServiceLogger('discord-bot');
 
 export const discordClient = new Client({
     intents: [
@@ -19,14 +22,11 @@ export const discordClient = new Client({
 });
 
 discordClient.once('ready', () => {
-    console.log('══════════════════════');
-    console.log('Discord Bot Ready');
-    console.log(discordClient.user?.tag);
-    console.log('══════════════════════');
+    log.info('Discord Bot Ready: ' + (discordClient.user?.tag || 'unknown'));
 });
 
 discordClient.on('error', (err) => {
-    console.log(err);
+    log.error('Discord client error', { error: err.message });
 });
 
 discordClient.on('messageReactionAdd', async (reaction, user) => {
@@ -35,7 +35,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
         try {
             await reaction.fetch();
         } catch (error) {
-            console.error('Something went wrong when fetching the message:', error);
+            log.error('Failed to fetch partial reaction', { error: String(error) });
             return;
         }
     }
@@ -46,7 +46,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
     // If not found in local JSON (because it was scraped on GitHub Actions), fetch from Google Sheets
     if (!pendingData) {
         try {
-            const contentInfo = await sheetsService.getContentByTelegramMessageId(messageId);
+            const contentInfo = await sheetsService.getContentByDiscordMessageId(messageId);
             if (contentInfo) {
                 const oppInfo = await sheetsService.getOpportunityById(contentInfo.opportunity_id);
                 if (oppInfo) {
@@ -54,7 +54,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
                 }
             }
         } catch (err) {
-            console.error('Error fetching from Sheets:', err);
+            log.error('Error fetching pending data from Sheets', { error: String(err) });
         }
     }
     
@@ -65,7 +65,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
 
     try {
         if (emoji === '✅') {
-            console.log(`Approving opportunity: ${opportunity.opportunity_name}`);
+            log.info(`Approving opportunity: ${opportunity.opportunity_name}`);
             
             // Check if it's already in Sheets (it will be if scraped from web)
             const existingOpp = await sheetsService.getOpportunityById(opportunity.id);
@@ -80,7 +80,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
             
             await reaction.message.edit(`✅ **APPROVED & SAVED**\n\n${reaction.message.content}`);
          } else if (emoji === '❌') {
-            console.log(`Rejecting opportunity: ${opportunity.opportunity_name}`);
+            log.info(`Rejecting opportunity: ${opportunity.opportunity_name}`);
             deletePendingOpportunity(messageId);
             
             // If it exists in Google Sheets, change status to 'rejected' so the scraper never adds it again
@@ -96,7 +96,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
             await reaction.message.edit(`❌ **REJECTED / UNAPPROVED**\n\n${originalContent}`);
             await reaction.message.reactions.removeAll();
         } else if (emoji === '🔄') {
-            console.log(`Regenerating opportunity: ${opportunity.opportunity_name}`);
+            log.info(`Regenerating content for: ${opportunity.opportunity_name}`);
             // Note: In a full implementation, you'd probably want to regenerate the image too.
             // But for now we just regenerate caption and update the message.
             const newContent = await generateContent({
@@ -130,7 +130,7 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
             }
         }
     } catch (error) {
-        console.error('Error handling reaction:', error);
+        log.error('Error handling Discord reaction', { error: String(error) });
         if (reaction.message.channel.isSendable()) {
             await reaction.message.channel.send(`⚠️ Error processing reaction for ${opportunity.opportunity_name}`);
         }

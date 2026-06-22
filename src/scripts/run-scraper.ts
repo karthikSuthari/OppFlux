@@ -29,7 +29,7 @@ async function main() {
     imagesGenerated: 0,
     duplicatesSkipped: 0,
     nonOpportunitiesSkipped: 0,
-    telegramSent: 0,
+    discordSent: 0,
     errors: 0,
     errorDetails: [],
   };

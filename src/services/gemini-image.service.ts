@@ -105,7 +105,7 @@ Style: Modern flat design with subtle 3D elements, gradient backgrounds, clean c
 }
 
 /**
- * Generate image and return the LOCAL file path (for Telegram upload).
+ * Generate image and return the LOCAL file path.
  * Does NOT upload to cloud storage — caller handles that.
  */
 export async function generateImageLocal(

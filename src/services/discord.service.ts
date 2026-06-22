@@ -1,6 +1,9 @@
 import { config } from '../config/env.js';
 import { discordClient } from './discord-bot.js';
 import { TextChannel } from 'discord.js';
+import { createServiceLogger } from '../utils/logger.js';
+
+const log = createServiceLogger('discord');
 
 export async function sendDiscordMessage(message: string): Promise<void> {
   if (!config.discordWebhookUrl) {
@@ -42,7 +45,7 @@ export async function sendDiscordReviewMessage(message: string): Promise<string 
     
     return sentMessage.id;
   } catch (error) {
-    console.error('Failed to send discord review message:', error);
+    log.error('Failed to send discord review message', { error: String(error) });
     return null;
   }
 }

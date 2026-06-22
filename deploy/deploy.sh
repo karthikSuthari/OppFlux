@@ -68,13 +68,7 @@ if [ "${HEALTHY}" = false ]; then
   exit 1
 fi
 
-# ─── Step 6: Register Telegram webhook ───
-echo ""
-echo "🔗 Step 6: Registering Telegram webhook..."
-bash deploy/register-webhook.sh
-echo "  ✅ Webhook registration complete"
-
-# ─── Step 7: Final status ───
+# ─── Step 6: Final status ───
 echo ""
 echo "═══════════════════════════════════════════"
 echo "  ✅ Deployment Complete!"

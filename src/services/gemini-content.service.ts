@@ -102,13 +102,7 @@ return result;
       { operationName: 'gemini.generateContent', maxRetries: 2 }
     );
 
-       const text = response.choices?.[0]?.message?.content?.trim();
-log.warn("RAW GROQ RESPONSE");
-console.log(text);      
-log.info('====================');
-log.info('GROQ RAW RESPONSE');
-console.log(text);
-log.info('===================='); 
+       const text = response.choices?.[0]?.message?.content?.trim(); 
       if (!text) {
       log.warn('Empty response from Gemini for content generation');
       return null;

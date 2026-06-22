@@ -4,9 +4,51 @@
 
 import { createServiceLogger } from '../utils/logger.js';
 import * as sheetsService from './sheets.service.js';
-import type { VideoEntry, GeminiExtraction, DuplicateCheckResult } from '../types/index.js';
+import type { VideoEntry, GeminiExtraction, DuplicateCheckResult, Opportunity } from '../types/index.js';
 
 const log = createServiceLogger('duplicate');
+
+// ── In-memory cache for duplicate checks ──
+// Avoids repeated full-table scans against Google Sheets API during a single pipeline run.
+
+let cachedOpportunities: Opportunity[] | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get existing opportunities, using an in-memory cache to avoid
+ * hammering the Google Sheets API on every duplicate check.
+ * Cache is invalidated after 5 minutes or when explicitly cleared.
+ */
+async function getCachedOpportunities(): Promise<Opportunity[]> {
+  const now = Date.now();
+  if (cachedOpportunities && (now - cacheTimestamp) < CACHE_TTL_MS) {
+    return cachedOpportunities;
+  }
+
+  log.debug('Refreshing opportunities cache from Google Sheets');
+  cachedOpportunities = await sheetsService.getExistingOpportunities();
+  cacheTimestamp = now;
+  return cachedOpportunities;
+}
+
+/**
+ * Add a newly created opportunity to the local cache so subsequent
+ * duplicate checks within the same run see it immediately.
+ */
+export function addToCache(opportunity: Opportunity): void {
+  if (cachedOpportunities) {
+    cachedOpportunities.push(opportunity);
+  }
+}
+
+/**
+ * Clear the cache (call at the start of a new pipeline run).
+ */
+export function clearCache(): void {
+  cachedOpportunities = null;
+  cacheTimestamp = 0;
+}
 
 /**
  * Levenshtein distance between two strings.
@@ -71,7 +113,7 @@ export async function checkDuplicate(
   };
 
   try {
-    const existingOpportunities = await sheetsService.getExistingOpportunities();
+    const existingOpportunities = await getCachedOpportunities();
 
     if (existingOpportunities.length === 0) {
       log.debug('No existing opportunities — cannot be a duplicate');
@@ -153,7 +195,7 @@ export async function checkScrapedDuplicate(
   };
 
   try {
-    const existingOpportunities = await sheetsService.getExistingOpportunities();
+    const existingOpportunities = await getCachedOpportunities();
 
     if (existingOpportunities.length === 0) {
       return NOT_DUPLICATE;
@@ -212,4 +254,3 @@ export async function checkScrapedDuplicate(
     return NOT_DUPLICATE;
   }
 }
-

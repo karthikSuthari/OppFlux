@@ -6,6 +6,7 @@
 import puppeteer from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import Groq from 'groq-sdk';
 import { config } from '../config/env.js';
 import { createServiceLogger } from '../utils/logger.js';
@@ -18,6 +19,19 @@ const groq = new Groq({ apiKey: config.groqApiKey });
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const VISITED_FILE = path.join(DATA_DIR, 'visited_links.json');
+const FAILED_FILE = path.join(DATA_DIR, 'failed_links.json');
+
+// Limits
+const MAX_LINKS_PER_SOURCE = 20;
+const MAX_VISITED_LINKS = 5000; // Prune beyond this
+const VISITED_TTL_DAYS = 30; // Drop entries older than 30 days
+const MAX_FAIL_RETRIES = 3;
+const GLOBAL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes for entire scrape
+const PAGE_TIMEOUT_MS = 30000; // 30 seconds per page navigation
+
+// Realistic browser User-Agent
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -31,6 +45,19 @@ export interface ScrapedOpportunity {
   extraction: GeminiExtraction;
   sourceUrl: string;
   sourceName: string;
+}
+
+// ── Visited link entry with timestamp for TTL ──
+
+interface VisitedEntry {
+  url: string;
+  timestamp: number; // epoch ms
+}
+
+interface FailedEntry {
+  url: string;
+  retries: number;
+  lastAttempt: number; // epoch ms
 }
 
 const EXTRACTION_PROMPT = `You are an AI assistant that analyzes webpage content about student opportunities.
@@ -76,21 +103,106 @@ IMPORTANT RULES:
 3. Extract the MOST relevant registration link.
 4. CRITICAL DEADLINE CHECK: Pay close attention to "TODAY'S DATE" provided in the user prompt. If the webpage explicitly states a registration deadline or event date that has ALREADY PASSED relative to today's date, you MUST set "is_opportunity": false.`;
 
-// ── Visited links tracking ──
+// ── Visited links tracking with TTL ──
 
-function loadVisitedLinks(): Set<string> {
-  if (fs.existsSync(VISITED_FILE)) {
-    try {
-      return new Set(JSON.parse(fs.readFileSync(VISITED_FILE, 'utf-8')));
-    } catch {
-      return new Set();
+function loadVisitedLinks(): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!fs.existsSync(VISITED_FILE)) return map;
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(VISITED_FILE, 'utf-8'));
+    const now = Date.now();
+    const ttlMs = VISITED_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+    // Support both old format (string[]) and new format (VisitedEntry[])
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        if (typeof item === 'string') {
+          // Old format: treat as recently visited
+          map.set(item, now);
+        } else if (item && typeof item === 'object' && item.url) {
+          const entry = item as VisitedEntry;
+          // Prune expired entries
+          if (now - entry.timestamp < ttlMs) {
+            map.set(entry.url, entry.timestamp);
+          }
+        }
+      }
     }
+
+    // Prune if too many entries (keep most recent)
+    if (map.size > MAX_VISITED_LINKS) {
+      const sorted = [...map.entries()].sort((a, b) => b[1] - a[1]);
+      map.clear();
+      for (const [url, ts] of sorted.slice(0, MAX_VISITED_LINKS)) {
+        map.set(url, ts);
+      }
+      log.info(`Pruned visited links from ${sorted.length} to ${map.size}`);
+    }
+  } catch {
+    log.warn('Failed to parse visited links file, starting fresh');
   }
-  return new Set();
+
+  return map;
 }
 
-function saveVisitedLinks(visited: Set<string>): void {
-  fs.writeFileSync(VISITED_FILE, JSON.stringify([...visited], null, 2), 'utf-8');
+/**
+ * Atomic file write: write to temp file then rename to prevent corruption
+ */
+function atomicWriteJson(filePath: string, data: unknown): void {
+  const tmpPath = filePath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmpPath, filePath);
+}
+
+function saveVisitedLinks(visited: Map<string, number>): void {
+  const entries: VisitedEntry[] = [...visited.entries()].map(([url, timestamp]) => ({
+    url,
+    timestamp,
+  }));
+  atomicWriteJson(VISITED_FILE, entries);
+}
+
+// ── Failed links tracking ──
+
+function loadFailedLinks(): Map<string, FailedEntry> {
+  const map = new Map<string, FailedEntry>();
+  if (!fs.existsSync(FAILED_FILE)) return map;
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(FAILED_FILE, 'utf-8')) as FailedEntry[];
+    for (const entry of raw) {
+      if (entry.retries < MAX_FAIL_RETRIES) {
+        map.set(entry.url, entry);
+      }
+      // Entries that have exhausted retries are silently dropped
+    }
+  } catch {
+    log.warn('Failed to parse failed links file, starting fresh');
+  }
+
+  return map;
+}
+
+function saveFailedLinks(failed: Map<string, FailedEntry>): void {
+  atomicWriteJson(FAILED_FILE, [...failed.values()]);
+}
+
+function recordFailedLink(
+  failed: Map<string, FailedEntry>,
+  url: string
+): void {
+  const existing = failed.get(url);
+  if (existing) {
+    existing.retries++;
+    existing.lastAttempt = Date.now();
+    if (existing.retries >= MAX_FAIL_RETRIES) {
+      log.info(`    🗑️ Permanently marking as failed after ${MAX_FAIL_RETRIES} retries: ${url}`);
+      failed.delete(url);
+    }
+  } else {
+    failed.set(url, { url, retries: 1, lastAttempt: Date.now() });
+  }
 }
 
 // ── Groq extraction ──
@@ -136,9 +248,17 @@ function matchesFilter(url: string, linkText: string, filter: string): boolean {
 
 async function scrapeSource(
   source: ScrapingSource,
-  visitedLinks: Set<string>
+  visitedLinks: Map<string, number>,
+  failedLinks: Map<string, FailedEntry>,
+  globalDeadline: number
 ): Promise<ScrapedOpportunity[]> {
   const results: ScrapedOpportunity[] = [];
+
+  // Check global timeout before starting
+  if (Date.now() >= globalDeadline) {
+    log.warn(`⏰ Global timeout reached, skipping source: ${source.source_name}`);
+    return results;
+  }
 
   log.info(`\n═══ Web Scraping: ${source.source_name} ═══`);
   log.info(`URL: ${source.source_url}`);
@@ -147,12 +267,20 @@ async function scrapeSource(
   }
 
   const browser = await puppeteer.launch({
-    headless: 'new' as any,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--single-process',
+    ],
   });
 
   try {
     const page = await browser.newPage();
+    await page.setDefaultNavigationTimeout(PAGE_TIMEOUT_MS);
     await page.setRequestInterception(true);
 
     page.on('request', req => {
@@ -168,15 +296,13 @@ async function scrapeSource(
         req.continue();
       }
     });
-    await page.setUserAgent(
-      'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-    );
+    await page.setUserAgent(USER_AGENT);
 
     // 1. Find event links on the listing page
     log.info('  Searching for event links...');
     await page.goto(source.source_url, {
-      waitUntil: 'networkidle2', // Wait for React/APIs to load
-      timeout: 30000
+      waitUntil: 'networkidle2',
+      timeout: PAGE_TIMEOUT_MS,
     });
 
     // Scroll down multiple times to trigger lazy-loaded cards
@@ -217,28 +343,34 @@ async function scrapeSource(
     // Apply filter
     const filteredLinks = uniqueLinks.filter((l) => matchesFilter(l.href, l.text, source.filter));
 
-    // Remove already-visited
+    // Remove already-visited (but allow retrying failed links)
     const newLinks = filteredLinks.filter((l) => !visitedLinks.has(l.href));
 
     log.info(`  Found ${newLinks.length} NEW links after filter (${uniqueLinks.length} total unique, ${filteredLinks.length} matched filter, ${uniqueLinks.length - filteredLinks.length} filtered out)`);
 
-    // 2. Deep-visit each new link (process up to 20 per source)
-    const limit = Math.min(newLinks.length, 20);
+    // 2. Deep-visit each new link (process up to MAX_LINKS_PER_SOURCE per source)
+    const limit = Math.min(newLinks.length, MAX_LINKS_PER_SOURCE);
     for (let i = 0; i < limit; i++) {
+      // Check global timeout
+      if (Date.now() >= globalDeadline) {
+        log.warn(`  ⏰ Global timeout reached mid-source, stopping at link ${i + 1}/${limit}`);
+        break;
+      }
+
       const eventUrl = newLinks[i].href;
       log.info(`  [${i + 1}/${limit}] Visiting: ${eventUrl}`);
 
       try {
         await page.goto(eventUrl, {
           waitUntil: 'networkidle2',
-          timeout: 80000
+          timeout: PAGE_TIMEOUT_MS,
         });
         const pageText = await page.evaluate(
           'document.body.innerText.slice(0,15000)'
         ) as string;
         if (pageText.length < 100) {
           log.info('    ⚠️ Too little text, skipping.');
-          visitedLinks.add(eventUrl);
+          visitedLinks.set(eventUrl, Date.now());
           continue;
         }
 
@@ -247,7 +379,7 @@ async function scrapeSource(
           const keyword = source.filter.toLowerCase().trim();
           if (!pageText.toLowerCase().includes(keyword)) {
             log.info(`    🔍 Page doesn't contain filter keyword "${source.filter}", skipping.`);
-            visitedLinks.add(eventUrl);
+            visitedLinks.set(eventUrl, Date.now());
             continue;
           }
         }
@@ -273,12 +405,16 @@ async function scrapeSource(
           log.info(`    🗑️ Rejected: ${reason}`);
         }
 
-        visitedLinks.add(eventUrl);
+        // Successfully processed — mark visited and remove from failed if present
+        visitedLinks.set(eventUrl, Date.now());
+        failedLinks.delete(eventUrl);
         saveVisitedLinks(visitedLinks);
       } catch (linkErr) {
         const errMsg = linkErr instanceof Error ? linkErr.message : String(linkErr);
         log.warn(`    ❌ Failed: ${errMsg}`);
-        visitedLinks.add(eventUrl); // Don't retry failed links
+        // Track failure for retry instead of permanently marking as visited
+        recordFailedLink(failedLinks, eventUrl);
+        saveFailedLinks(failedLinks);
       }
     }
   } catch (error) {
@@ -298,10 +434,20 @@ async function scrapeSource(
  * Run the web scraper across all active sources from the ScrapingSources sheet.
  * Sources are processed ONE AT A TIME (sequential) to stay within 1GB RAM.
  * Returns an array of scraped opportunities ready for the pipeline.
+ *
+ * Features:
+ * - Global 30-minute timeout to prevent runaway scrapes
+ * - TTL-based visited links pruning (30-day expiry)
+ * - Failed links tracking with 3-retry limit
+ * - Atomic file writes to prevent data corruption
  */
 export async function runWebScraper(): Promise<ScrapedOpportunity[]> {
   const allResults: ScrapedOpportunity[] = [];
   const visitedLinks = loadVisitedLinks();
+  const failedLinks = loadFailedLinks();
+  const globalDeadline = Date.now() + GLOBAL_TIMEOUT_MS;
+
+  log.info(`Visited links loaded: ${visitedLinks.size}, Failed links pending retry: ${failedLinks.size}`);
 
   // Load sources from Google Sheets
   const sources = await sheetsService.getActiveScrapingSources();
@@ -312,11 +458,17 @@ export async function runWebScraper(): Promise<ScrapedOpportunity[]> {
   }
 
   log.info(`Loaded ${sources.length} active scraping sources from Sheets`);
+  log.info(`Global timeout: ${GLOBAL_TIMEOUT_MS / 60000} minutes`);
 
   // Process ONE source at a time (sequential for 1GB RAM)
   for (const source of sources) {
+    if (Date.now() >= globalDeadline) {
+      log.warn(`⏰ Global timeout reached, skipping remaining sources`);
+      break;
+    }
+
     try {
-      const results = await scrapeSource(source, visitedLinks);
+      const results = await scrapeSource(source, visitedLinks, failedLinks, globalDeadline);
       allResults.push(...results);
       log.info(`  ✅ ${source.source_name}: ${results.length} opportunities found`);
     } catch (error) {
@@ -328,6 +480,11 @@ export async function runWebScraper(): Promise<ScrapedOpportunity[]> {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
+  // Final save
+  saveVisitedLinks(visitedLinks);
+  saveFailedLinks(failedLinks);
+
   log.info(`\n═══ Web Scraping Complete: ${allResults.length} opportunities found from ${sources.length} sources ═══`);
+  log.info(`  Visited links: ${visitedLinks.size}, Failed links pending retry: ${failedLinks.size}`);
   return allResults;
 }

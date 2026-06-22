@@ -35,6 +35,7 @@ test-groq.js
 .env.backup
 data/pending_opportunities.json
 data/visited_links.json
+data/failed_links.json
 
 # Logs
 *.log

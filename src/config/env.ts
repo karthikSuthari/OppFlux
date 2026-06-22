@@ -9,15 +9,13 @@ import type { AppConfig } from '../types/index.js';
 // Load .env
 const envPath = path.resolve(process.cwd(), '.env');
 
-console.log('Loading env from:', envPath);
-
 const result = dotenv.config({
   path: envPath,
 });
 
-console.log('Dotenv result:', result.error ? result.error : 'Loaded');
-console.log('GROQ =', process.env.GROQ_API_KEY);
-console.log('NODE_ENV =', process.env.NODE_ENV);
+if (result.error) {
+  console.error('Failed to load .env file:', result.error.message);
+}
 
 /**
  * Validates and loads all required environment variables.
@@ -48,103 +46,45 @@ function loadConfig(): AppConfig {
   }
 
   const config: AppConfig = {
+    // AI
     groqApiKey: requireEnv('GROQ_API_KEY'),
     geminiApiKey: requireEnv('GEMINI_API_KEY'),
 
+    // Google Sheets
     googleSheetsId: requireEnv('GOOGLE_SHEETS_ID'),
-    googleServiceAccountEmail: requireEnv(
-      'GOOGLE_SERVICE_ACCOUNT_EMAIL'
-    ),
-    googlePrivateKey: requireEnv(
-      'GOOGLE_PRIVATE_KEY'
-    ),
+    googleServiceAccountEmail: requireEnv('GOOGLE_SERVICE_ACCOUNT_EMAIL'),
+    googlePrivateKey: requireEnv('GOOGLE_PRIVATE_KEY'),
 
-    imageOutputDir: optionalEnv(
-      'IMAGE_OUTPUT_DIR',
-      './images'
-    ),
+    // Discord
+    discordBotToken: requireEnv('DISCORD_BOT_TOKEN'),
+    discordChannelId: requireEnv('DISCORD_CHANNEL_ID'),
+    discordWebhookUrl: optionalEnv('DISCORD_WEBHOOK_URL', ''),
 
-    logLevel: optionalEnv(
-      'LOG_LEVEL',
-      'info'
-    ),
+    // Storage
+    imageOutputDir: optionalEnv('IMAGE_OUTPUT_DIR', './images'),
 
+    // Logging
+    logLevel: optionalEnv('LOG_LEVEL', 'info'),
+
+    // Pipeline
     pollIntervalMinutes: parseInt(
-      optionalEnv(
-        'POLL_INTERVAL_MINUTES',
-        '30'
-      ),
+      optionalEnv('POLL_INTERVAL_MINUTES', '30'),
       10
     ),
-
-    dryRun:
-      optionalEnv('DRY_RUN', 'false')
-        .toLowerCase() === 'true',
-
+    dryRun: optionalEnv('DRY_RUN', 'false').toLowerCase() === 'true',
     geminiRateLimitMs: parseInt(
-      optionalEnv(
-        'GEMINI_RATE_LIMIT_MS',
-        '1500'
-      ),
+      optionalEnv('GEMINI_RATE_LIMIT_MS', '1500'),
       10
     ),
 
-    telegramBotToken: optionalEnv(
-      'TELEGRAM_BOT_TOKEN',
-      ''
-    ),
-
-    telegramChatId: optionalEnv(
-      'TELEGRAM_CHAT_ID',
-      ''
-    ),
-
-    discordWebhookUrl: optionalEnv(
-      'DISCORD_WEBHOOK_URL',
-      ''
-    ),
-
-    discordBotToken:
-      optionalEnv(
-        'DISCORD_BOT_TOKEN',
-        ''
-      ),
-
-    discordChannelId:
-      optionalEnv(
-        'DISCORD_CHANNEL_ID',
-        ''
-      ),
-
-    webhookPort: parseInt(
-      optionalEnv(
-        'WEBHOOK_PORT',
-        '3000'
-      ),
-      10
-    ),
-
-    webhookUrl: optionalEnv(
-      'WEBHOOK_URL',
-      ''
-    ),
-
-    webhookSecret: optionalEnv(
-      'WEBHOOK_SECRET',
-      ''
-    ),
-
-    nodeEnv: optionalEnv(
-      'NODE_ENV',
-      'development'
-    ),
+    // Server
+    webhookPort: parseInt(optionalEnv('WEBHOOK_PORT', '3000'), 10),
+    nodeEnv: optionalEnv('NODE_ENV', 'development'),
   };
 
   if (missing.length > 0) {
-    console.log('MISSING =', missing);
-    console.log('GROQ =', process.env.GROQ_API_KEY);
-    console.log('NODE_ENV =', process.env.NODE_ENV);
-
+    console.error(`Missing required environment variables: ${missing.join(', ')}`);
+    console.error('Copy .env.example to .env and fill in all required values.');
     process.exit(1);
   }
 

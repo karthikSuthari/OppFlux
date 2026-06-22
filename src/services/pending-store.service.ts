@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import type { Opportunity, Content } from '../types/index.js';
+import { createServiceLogger } from '../utils/logger.js';
+
+const log = createServiceLogger('pending-store');
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const PENDING_FILE = path.join(DATA_DIR, 'pending_opportunities.json');
@@ -27,7 +30,7 @@ function readStore(): PendingStore {
     const data = fs.readFileSync(PENDING_FILE, 'utf-8');
     return JSON.parse(data) as PendingStore;
   } catch (error) {
-    console.error('Error reading pending store:', error);
+    log.error('Error reading pending store', { error: String(error) });
     return {};
   }
 }
@@ -37,7 +40,7 @@ function writeStore(store: PendingStore): void {
   try {
     fs.writeFileSync(PENDING_FILE, JSON.stringify(store, null, 2), 'utf-8');
   } catch (error) {
-    console.error('Error writing pending store:', error);
+    log.error('Error writing pending store', { error: String(error) });
   }
 }
 

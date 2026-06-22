@@ -7,7 +7,7 @@
 
 module.exports = {
   apps: [
-    // ─── Pipeline (Cron Job: every 1 hour) ───
+    // ─── Pipeline (Cron Job: every 5 hours) ───
     {
       name: 'content-engine',
       script: 'dist/index.js',
@@ -39,7 +39,7 @@ module.exports = {
       exec_mode: 'fork',
     },
 
-    // ─── Unified Server (Always Running — Webhook Mode) ───
+    // ─── Unified Server (Always Running — Webhook Mode + Discord Bot) ───
     {
       name: 'content-server',
       script: 'dist/server.js',

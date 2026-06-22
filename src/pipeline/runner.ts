@@ -12,7 +12,7 @@ import { extractOpportunity } from '../services/gemini-extract.service.js';
 import { generateContent } from '../services/gemini-content.service.js';
 import { generateImageLocal } from '../services/gemini-image.service.js';
 import { uploadImage } from '../services/cloud-storage.service.js';
-import { checkDuplicate, checkScrapedDuplicate } from '../services/duplicate.service.js';
+import { checkDuplicate, checkScrapedDuplicate, clearCache, addToCache } from '../services/duplicate.service.js';
 import { sendDiscordMessage, sendDiscordReviewMessage } from '../services/discord.service.js';
 import { savePendingOpportunity } from '../services/pending-store.service.js';
 import { runWebScraper } from '../services/web-scraper.service.js';
@@ -25,47 +25,47 @@ import type {
 } from '../types/index.js';
 
 const log = createServiceLogger('pipeline');
+/**
+ * Consolidated keyword list for opportunity detection.
+ * A video must match at least one of these keywords in title or description.
+ */
 const OPPORTUNITY_KEYWORDS = [
-
+  // Opportunity types
   'hackathon',
   'internship',
   'scholarship',
   'fellowship',
-
   'ambassador',
   'facilitator',
+  'competition',
+  'contest',
+  'challenge',
+  'certificate',
+  'bootcamp',
+  'summit',
+  'career summit',
 
+  // Specific programs
+  'google arcade',
+  'arcade facilitator',
+  'gsoc',
+  'season of docs',
+  'season of ai',
+  'kaggle',
+
+  // Incentives
   'stipend',
   'cash prize',
   '5 lakh',
   '1 lakh',
-
-  'competition',
-  'contest',
-  'challenge',
-
-  'certificate',
-
-  'bootcamp',
-
-  'google arcade',
-  'arcade facilitator',
-
-  'gsoc',
-  'season of docs',
-  'season of ai',
-
   'grant',
   'funding',
 
-  'career summit',
-  'summit',
-
+  // Action phrases
   'apply now',
   'registrations open',
   'last date',
-  'deadline'
-
+  'deadline',
 ];
 function mightBeOpportunity(video: VideoEntry): boolean {
 
@@ -160,7 +160,7 @@ function shouldSkipVideo(video: VideoEntry): boolean {
  * 1. Connect to Google Sheets
  * 2. Fetch active channels
  * 3. For each channel, fetch RSS feed
- * 4. For each video: duplicate check → extract → generate content → generate image → save → send to Telegram
+ * 4. For each video: duplicate check → extract → generate content → generate image → save → send to Discord
  * 5. Log summary
  */
 export async function runPipeline(): Promise<PipelineRunSummary> {
@@ -176,7 +176,7 @@ export async function runPipeline(): Promise<PipelineRunSummary> {
     imagesGenerated: 0,
     duplicatesSkipped: 0,
     nonOpportunitiesSkipped: 0,
-    telegramSent: 0,
+    discordSent: 0,
     errors: 0,
     errorDetails: [],
   };
@@ -190,6 +190,9 @@ export async function runPipeline(): Promise<PipelineRunSummary> {
     // Step 1: Initialize Google Sheets
     log.info('Step 1: Connecting to Google Sheets...');
     await sheetsService.initializeSheets();
+
+    // Clear duplicate detection cache for a fresh start
+    clearCache();
 
     // Step 2: Get active channels
     log.info('Step 2: Fetching active channels...');
@@ -294,7 +297,7 @@ async function processChannel(
 
 /**
  * Process a single video through the full pipeline:
- * Duplicate check → Extract → Content → Image → Save → Telegram review
+ * Duplicate check → Extract → Content → Image → Save → Discord review
  */
 async function processVideo(
   video: VideoEntry,
@@ -326,55 +329,6 @@ async function processVideo(
   log.info('  🤖 Extracting opportunity data...');
   await sleep(config.geminiRateLimitMs);
 
-  const mustContain = [
-
-    'hackathon',
-
-    'internship',
-
-    'scholarship',
-    'fellowship',
-
-    'ambassador',
-
-    'facilitator',
-
-    'stipend',
-
-    'grant',
-
-    'certificate',
-
-    'bootcamp',
-
-    'summit',
-
-    'competition',
-    'contest',
-    'challenge',
-
-    'gsoc',
-
-    'season of ai',
-
-    'season of docs',
-
-    'google arcade',
-
-    'kaggle'
-
-  ];
-  const title = video.title.toLowerCase();
-
-  if (!mustContain.some(
-    k => title.includes(k)
-  )) {
-
-    summary.nonOpportunitiesSkipped++;
-
-    return;
-
-  }
   let extraction: GeminiExtraction | null = null;
 
 
@@ -434,7 +388,7 @@ async function processVideo(
   }
 
   // ── Step D: Save opportunity to Sheets ──
-  const opportunityId = uuidv4().substring(0, 8);
+  const opportunityId = uuidv4().replace(/-/g, '').substring(0, 16);
   const opportunity: Opportunity = {
     id: opportunityId,
     opportunity_name: extraction.opportunity_name,
@@ -473,7 +427,7 @@ async function processVideo(
   log.info('  🎨 Generating image...');
   await sleep(config.geminiRateLimitMs);
 
-  // Generate local image first (we need it for Telegram upload)
+  // Generate local image first
   const localImagePath = await generateImageLocal(contentResult.image_prompt, opportunityId);
   let cloudImageUrl = '';
 
@@ -494,7 +448,7 @@ async function processVideo(
     image_prompt: contentResult.image_prompt,
     image_url: cloudImageUrl,
     content_status: 'pending_review',
-    telegram_message_id: '',
+    discord_message_id: '',
     review_status: 'pending',
     reviewed_at: '',
     reviewed_by: '',
@@ -512,7 +466,7 @@ async function processVideo(
 
       if (messageId) {
         savePendingOpportunity(messageId, opportunity, content);
-        summary.telegramSent++;
+        summary.discordSent++;
         log.info('  📢 Discord review message sent, awaiting reaction');
       } else {
         log.warn('  ⚠️ Failed to send Discord review message or retrieve message ID');
@@ -523,6 +477,7 @@ async function processVideo(
   }
 
   log.info(`  ✅ Successfully processed: "${opportunity.opportunity_name}"`);
+  addToCache(opportunity);
 }
 
 /**
@@ -546,7 +501,7 @@ export async function processScrapedOpportunity(
   }
 
   // ── Step B: Build opportunity object ──
-  const opportunityId = uuidv4().substring(0, 8);
+  const opportunityId = uuidv4().replace(/-/g, '').substring(0, 16);
   const opportunity: Opportunity = {
     id: opportunityId,
     opportunity_name: extraction.opportunity_name,
@@ -592,7 +547,7 @@ export async function processScrapedOpportunity(
     image_prompt: contentResult.image_prompt,
     image_url: cloudImageUrl,
     content_status: 'pending_review',
-    telegram_message_id: '',
+    discord_message_id: '',
     review_status: 'pending',
     reviewed_at: '',
     reviewed_by: '',
@@ -609,7 +564,7 @@ export async function processScrapedOpportunity(
       if (messageId) {
         // Immediately save to Sheets as pending so the Oracle server can find it
         opportunity.status = 'pending_review';
-        content.telegram_message_id = messageId;
+        content.discord_message_id = messageId;
         content.content_status = 'pending_review';
         
         await sheetsService.addOpportunity(opportunity);
@@ -617,7 +572,7 @@ export async function processScrapedOpportunity(
         
         // Save locally just in case
         savePendingOpportunity(messageId, opportunity, content);
-        summary.telegramSent++;
+        summary.discordSent++;
         log.info('  📢 Discord review message sent & saved to Sheets as pending');
       } else {
         log.warn('  ⚠️ Failed to send Discord review message');
@@ -628,6 +583,7 @@ export async function processScrapedOpportunity(
   }
 
   summary.opportunitiesCreated++;
+  addToCache(opportunity);
   log.info(`  ✅ Successfully processed scraped: "${opportunity.opportunity_name}"`);
 }
 
@@ -650,7 +606,7 @@ function finalizeSummary(summary: PipelineRunSummary): PipelineRunSummary {
   log.info(`  Opportunities created: ${summary.opportunitiesCreated}`);
   log.info(`  Content generated:     ${summary.contentGenerated}`);
   log.info(`  Images generated:      ${summary.imagesGenerated}`);
-  log.info(`  Telegram sent:         ${summary.telegramSent}`);
+  log.info(`  Discord sent:          ${summary.discordSent}`);
   log.info(`  Duplicates skipped:    ${summary.duplicatesSkipped}`);
   log.info(`  Non-opportunities:     ${summary.nonOpportunitiesSkipped}`);
   log.info(`  Errors:                ${summary.errors}`);
