@@ -16,9 +16,10 @@ export const discordClient = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildMessageReactions,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
     ],
-    partials: [Partials.Message, Partials.Reaction, Partials.User]
+    partials: [Partials.Message, Partials.Reaction, Partials.User, Partials.Channel]
 });
 
 discordClient.once('ready', () => {
@@ -30,12 +31,27 @@ discordClient.on('error', (err) => {
 });
 
 discordClient.on('messageReactionAdd', async (reaction, user) => {
-    if (user.bot) return;
+    log.info(`🔔 Reaction detected: ${reaction.emoji.name} by ${user.tag || user.id} on message ${reaction.message.id}`);
+    
+    if (user.bot) {
+        log.info('  Ignoring bot reaction');
+        return;
+    }
+    
+    // Fetch partial reaction/message if needed (messages not in cache)
     if (reaction.partial) {
         try {
             await reaction.fetch();
         } catch (error) {
             log.error('Failed to fetch partial reaction', { error: String(error) });
+            return;
+        }
+    }
+    if (reaction.message.partial) {
+        try {
+            await reaction.message.fetch();
+        } catch (error) {
+            log.error('Failed to fetch partial message', { error: String(error) });
             return;
         }
     }
