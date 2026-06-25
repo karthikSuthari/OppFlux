@@ -1,299 +1,218 @@
-# 🎓 Opportunity Content Engine
+# 🎓 Opportunity Content Engine (v2.0.0)
 
-Automated pipeline that discovers student opportunities from YouTube channels, extracts structured data using Google Gemini AI, generates Instagram-ready content and images, and stores everything in Google Sheets.
+[![TypeScript](https://img.shields.io/badge/Language-TypeScript-blue.svg)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020%2B-green.svg)](https://nodejs.org/)
+[![AI-Gemini](https://img.shields.io/badge/AI-Gemini%202.0%20Flash-orange.svg)](https://aistudio.google.com/)
+[![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
+
+An automated pipeline that monitors YouTube feeds and executes aggressive web-scraping to discover student opportunities. It leverages Google Gemini AI to extract structured data, generate Instagram-ready captions and visuals, saves everything to Google Sheets, and hooks into Discord for real-time review.
+
+---
 
 ## 📋 Table of Contents
 
-- [Architecture](#architecture)
-- [Features](#features)
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Google Sheets Setup](#google-sheets-setup)
-- [Deployment to Oracle Cloud](#deployment-to-oracle-cloud)
-- [PM2 Management](#pm2-management)
-- [Troubleshooting](#troubleshooting)
-- [Production Readiness Checklist](#production-readiness-checklist)
+- [Architecture](#-architecture)
+- [Features](#-features)
+- [Tech Stack](#-tech-stack)
+- [Prerequisites](#-prerequisites)
+- [Quick Start](#-quick-start)
+- [Google Sheets Setup](#-google-sheets-setup)
+- [Configuration Reference](#-configuration-reference)
+- [Deployment (Oracle Cloud / VM)](#-deployment-oracle-cloud--vm)
+- [Process Management (PM2)](#-process-management-pm2)
+- [Project Structure](#-project-structure)
+- [Troubleshooting](#-troubleshooting)
+- [Repository Public Release Safety](#-repository-public-release-safety)
+- [License](#-license)
 
 ---
 
 ## 🏗 Architecture
 
+The system is split into two components managed by PM2:
+1. **The Pipeline (Cron Job)**: Runs every 5 hours to poll sources, run scrapers, extract details, and save them.
+2. **The Server (Always Running Daemon)**: Serves a health check endpoint and hosts the Discord Bot client listening for reactions on pending opportunities.
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    PM2 SCHEDULER                         │
-│                  (every 30 minutes)                      │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│                  PIPELINE RUNNER                         │
-│                                                          │
-│  1. Get active channels from Sheets                      │
-│  2. For each channel:                                    │
-│     ├─ Fetch YouTube RSS feed                           │
-│     └─ For each video:                                  │
-│        ├─ Check duplicates (3-layer)                    │
-│        ├─ Extract opportunity (Gemini)                  │
-│        ├─ Generate caption + hashtags (Gemini)          │
-│        ├─ Generate image (Gemini)                       │
-│        └─ Save to Sheets                                │
-└─────────────────────────────────────────────────────────┘
+                  ┌───────────────────────────────┐
+                  │          PM2 PROCESS          │
+                  └──────────────┬────────────────┘
+                                 │
+         ┌───────────────────────┴───────────────────────┐
+         ▼ (Cron Schedule)                               ▼ (Always-On Daemon)
+┌────────────────────────────────┐              ┌────────────────────────────────┐
+│     PIPELINE RUNNER (Index)    │              │     UNIFIED SERVER (Server)    │
+│  - Poll YouTube Feed Channels  │              │  - Runs Express Health Checks  │
+│  - Run Aggressive Web Scraper  │              │  - Monitors Discord Reactions  │
+│  - AI Feature Extraction       │              │  - Updates Sheets Statuses     │
+│  - Social Content Generation   │              └────────────────────────────────┘
+│  - Google Sheets Storage       │
+└────────────────────────────────┘
 ```
 
 ### Data Flow
 
 ```
-YouTube RSS → Parse → Duplicate Check → Gemini Extract → Gemini Content → Gemini Image → Google Sheets
+[Sources: RSS/Scraping] ➔ [3-Layer Deduplication] ➔ [Gemini AI Extraction] ➔ [Gemini Visuals & Captions] ➔ [Discord Review Embed] ➔ [Google Sheets Approval]
 ```
-
-### Tech Stack
-
-| Component | Technology |
-|---|---|
-| Runtime | Node.js + TypeScript |
-| AI | Google Gemini 2.0 Flash |
-| Storage | Google Sheets |
-| Scheduling | PM2 Cron |
-| Hosting | Oracle Cloud VM |
-| Logging | Winston |
 
 ---
 
 ## ✨ Features
 
-- **Automated Discovery**: Monitors YouTube RSS feeds for new opportunity videos
-- **AI Extraction**: Uses Gemini to extract structured opportunity data (name, organizer, deadline, eligibility, rewards)
-- **Content Generation**: Creates Instagram-ready captions, hashtags, and image prompts
-- **Image Generation**: Produces professional Instagram visuals using Gemini image generation
-- **Duplicate Detection**: Three-layer protection (video ID, registration link, fuzzy name matching)
-- **Structured Logging**: Winston with daily log rotation and JSON format
-- **Error Resilience**: Individual video failures don't stop the pipeline
-- **Dry Run Mode**: Test without writing to Sheets
-- **Auto-initialization**: Missing Sheets tabs are created automatically
+- **Automated Opportunity Discovery**: Watches YouTube RSS feeds and utilizes a Puppeteer scraper configured with automatic scrolling, pop-up dismissal, and detailed page extraction.
+- **AI Extraction & Reasoning**: Extracts structured data (event name, organizer, deadline, eligibility, rewards, and fees) using Gemini. Rejects stale or non-opportunity links.
+- **Discord Feedback Loop**: Pushes pending items to a designated Discord channel. Approving or rejecting via emoji reactions directly updates the source spreadsheet.
+- **Dynamic Content Generator**: Formats captions, targeted hashtags, and high-quality image generation prompts tailored for Instagram.
+- **Robust Duplication Safeguards**: Avoids spam using a 3-layer check combining Video ID matching, link tracking, and fuzzy string distance matching.
+- **Log Management**: Structured file log rotation using Winston.
+
+---
+
+## 🛠 Tech Stack
+
+- **Runtime Environment**: Node.js + TypeScript
+- **Web Scraping**: Puppeteer
+- **AI Engines**: Google Gemini API (`@google/genai`) & Groq SDK (Llama-3.3-70b-versatile)
+- **Data Store**: Google Sheets API via `google-spreadsheet`
+- **Orchestration**: Express.js & Discord.js (`v14`)
+- **Process Management**: PM2
 
 ---
 
 ## 📋 Prerequisites
 
-1. **Node.js** 20+ installed
-2. **Gemini API Key** from [Google AI Studio](https://aistudio.google.com/apikey)
-3. **Google Cloud Service Account** with Sheets API enabled
-4. **Google Sheets** spreadsheet shared with the service account email
+Before running the application, make sure you have:
+1. **Node.js 20+** installed on your server or local environment.
+2. **Gemini API Key** from [Google AI Studio](https://aistudio.google.com/apikey).
+3. **Groq API Key** (optional, for alternative reasoning engines).
+4. **Google Cloud Service Account** with the **Google Sheets API** enabled.
+5. **Google Sheets ID** of the spreadsheet you want to store details on.
+6. **Discord Bot Token & Channel Webhook** for notifications.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Clone and Install
-
+### 1. Clone & Install
 ```bash
 git clone https://github.com/karthikSuthari/Content.git
 cd Content
 npm install
 ```
 
-### 2. Configure Environment
-
+### 2. Set Up Environment Variables
+Copy the template configuration file:
 ```bash
 cp .env.example .env
-# Edit .env with your actual values
 ```
+Fill in the variables in `.env` (see the [Configuration Reference](#-configuration-reference) section).
 
-Required values in `.env`:
+### 3. Initialize Spreadsheet Columns
+Share your Google Sheet with your service account email (Editor access). 
+*(Note: Missing sheets/tabs are auto-created when the pipeline boots).*
 
-```env
-GEMINI_API_KEY=your-gemini-api-key
-GOOGLE_SHEETS_ID=1kd8BZda47CSerTKZfiAm1KUxfOqga3DNscTPxTAfvlY
-GOOGLE_SERVICE_ACCOUNT_EMAIL=oppurtunity@gen-lang-client-0304817256.iam.gserviceaccount.com
-GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-```
-
-### 3. Add YouTube Channels
-
-In Google Sheets, go to the **Channels** tab and add rows:
-
-| channel_name | channel_id | active |
-|---|---|---|
-| Google Cloud | UCVHFbqXqoYvEWM1Ddxl0QDg | TRUE |
-| freeCodeCamp | UC8butISFwT-Wl7EV0hUK0BQ | TRUE |
-
-### 4. Run
-
+### 4. Running Scripts
 ```bash
-# Development (with TypeScript)
+# Run Express server & Discord Bot (Local Dev)
 npm run dev
 
-# Dry run (no writes to Sheets)
+# Run Pipeline Engine (Local Dev)
+npm run dev:pipeline
+
+# Run Pipeline in Dry Run Mode (No Google Sheets mutations)
 npm run pipeline:dry-run
 
-# Production (build first)
+# Run Independent Scraper Test
+npm run scrape
+
+# Build & Run Production Bundle
 npm run build
-npm start
+npm run start           # Starts server daemon
+npm run start:pipeline  # Runs pipeline run once
 ```
-
----
-
-## ⚙ Configuration
-
-| Variable | Description | Default |
-|---|---|---|
-| `GEMINI_API_KEY` | Google Gemini API key | **Required** |
-| `GOOGLE_SHEETS_ID` | Google Sheets spreadsheet ID | **Required** |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Service account email | **Required** |
-| `GOOGLE_PRIVATE_KEY` | Service account private key | **Required** |
-| `IMAGE_OUTPUT_DIR` | Directory for generated images | `./images` |
-| `LOG_LEVEL` | Logging level (error/warn/info/debug) | `info` |
-| `POLL_INTERVAL_MINUTES` | Feed polling interval | `30` |
-| `DRY_RUN` | Run without writing to Sheets | `false` |
-| `GEMINI_RATE_LIMIT_MS` | Delay between Gemini API calls | `1500` |
 
 ---
 
 ## 📊 Google Sheets Setup
 
-### 1. Share the Spreadsheet
+Share the spreadsheet with your service account (e.g. `your-service-account@your-project.iam.gserviceaccount.com`) as an **Editor**. The engine will automatically construct the tabs if they do not exist:
 
-Share your Google Sheet with the service account email (Editor access):
-```
-oppurtunity@gen-lang-client-0304817256.iam.gserviceaccount.com
-```
-
-### 2. Sheet Tabs (auto-created if missing)
-
-**Channels** — YouTube channels to monitor
-
-| channel_name | channel_id | active |
-|---|---|---|
-| Example Channel | UC... | TRUE |
-
-**Opportunities** — Extracted opportunity data
-
-| id | opportunity_name | organizer | registration_link | deadline | eligibility | rewards | source_video | source_channel | status | created_at |
-
-**Content** — Generated Instagram content
-
-| opportunity_id | caption | hashtags | image_prompt | image_url | content_status |
-
-**Posted** — Instagram posting log
-
-| opportunity_id | instagram_post_url | posted_at |
+1. **Channels**: Monitors YouTube channel IDs.
+   * Required headers: `channel_name`, `channel_id`, `active`
+2. **Opportunities**: Extracted raw data.
+   * Required headers: `id`, `opportunity_name`, `organizer`, `registration_link`, `deadline`, `eligibility`, `rewards`, `source_video`, `source_channel`, `status`, `created_at`
+3. **Content**: Generated marketing content.
+   * Required headers: `opportunity_id`, `caption`, `hashtags`, `image_prompt`, `image_url`, `content_status`
 
 ---
 
-## 🚀 Deployment to Oracle Cloud
+## ⚙ Configuration Reference
 
-### 1. Transfer SSH Keys
+| Environment Variable | Description | Default / Format |
+|---|---|---|
+| `NODE_ENV` | Run Environment | `development` / `production` |
+| `GEMINI_API_KEY` | Google Gemini API Authorization Key | **Required** |
+| `GROQ_API_KEY` | Groq API Authorization Key | **Required** |
+| `GOOGLE_SHEETS_ID` | Spreadsheet ID from the Sheets URL | **Required** |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL`| Service Account client email address | **Required** |
+| `GOOGLE_PRIVATE_KEY` | Service Account secret private key | `"-----BEGIN PRIVATE KEY-----\n..."` |
+| `DISCORD_BOT_TOKEN` | Bot client token | **Required** |
+| `DISCORD_CHANNEL_ID` | Bot listener channel | **Required** |
+| `DISCORD_WEBHOOK_URL` | Channel webhook link | **Required** |
+| `IMAGE_OUTPUT_DIR` | Local storage location for generated assets | `./images` |
+| `LOG_LEVEL` | Minimum log logging level | `info` |
+| `DRY_RUN` | Run without writing outputs to Sheets | `false` |
 
+---
+
+## 🚀 Deployment (Oracle Cloud / VM)
+
+### 1. SSH into the Remote Instance
 ```bash
-# From your local machine
-chmod 400 ssh-key-2026-06-15.key
-ssh -i ssh-key-2026-06-15.key opc@YOUR_VM_IP
+ssh -i /path/to/ssh-key.key opc@YOUR_VM_IP
 ```
 
-### 2. Run Setup Script
-
+### 2. Copy Setup Files
+You can upload the configuration utilities in the `/deploy` folder to automate package installation:
 ```bash
-# Transfer the script
-scp -i ssh-key-2026-06-15.key deploy/setup.sh opc@YOUR_VM_IP:/tmp/
+scp -i /path/to/ssh-key.key deploy/setup.sh opc@YOUR_VM_IP:/tmp/
+```
 
-# SSH into VM and run
-ssh -i ssh-key-2026-06-15.key opc@YOUR_VM_IP
+### 3. Run VM Setup
+On the remote VM, run the installer:
+```bash
 chmod +x /tmp/setup.sh
 /tmp/setup.sh
 ```
+This installs Node.js, PM2, and fetches Puppeteer dependencies.
 
-### 3. Configure Environment
-
-```bash
-cd /opt/content-engine
-nano .env
-# Fill in all required values
-```
-
-### 4. Start the Pipeline
-
-```bash
-pm2 restart content-engine
-pm2 logs content-engine --lines 50
-```
+### 4. Create local environment
+Navigate to `/opt/content-engine`, create a `.env` file, and paste your active production environment variables.
 
 ---
 
-## 🔧 PM2 Management
+## 🔧 Process Management (PM2)
+
+Use [ecosystem.config.cjs](file:///c:/Users/sutha/Desktop/Content/ecosystem.config.cjs) to manage execution.
 
 ```bash
-# View status
+# Start both server and pipeline
+pm2 start ecosystem.config.cjs
+
+# Show real-time system logs
+pm2 logs
+
+# Display active tasks and daemon statuses
 pm2 list
 
-# View logs (real-time)
-pm2 logs content-engine
-
-# View recent logs
-pm2 logs content-engine --lines 100
-
-# Restart
-pm2 restart content-engine
-
-# Stop
-pm2 stop content-engine
-
-# Delete
-pm2 delete content-engine
-
-# Monitor (CPU, memory, logs)
+# Monitor resource usage
 pm2 monit
 
-# Save current process list
+# Save current PM2 processes to restore on system reboot
 pm2 save
-
-# Startup script (auto-start on boot)
 pm2 startup
 ```
-
----
-
-## 🐛 Troubleshooting
-
-### "Missing required environment variables"
-→ Copy `.env.example` to `.env` and fill in all required values.
-
-### "Tab not found"
-→ The system auto-creates tabs. Ensure the service account has Editor access.
-
-### "Gemini extraction failed"
-→ Check your `GEMINI_API_KEY` is valid. Verify at [AI Studio](https://aistudio.google.com/).
-
-### "No active channels found"
-→ Add channels to the Channels tab with `active` set to `TRUE`.
-
-### "RSS feed fetch failed"
-→ Verify the channel ID is correct. Test the feed URL in your browser.
-
-### "Image generation failed"
-→ Image generation requires paid Gemini API tier. The pipeline continues without images.
-
-### Log files
-→ Check `logs/app-YYYY-MM-DD.log` and `logs/error-YYYY-MM-DD.log`
-
----
-
-## ✅ Production Readiness Checklist
-
-- [ ] Gemini API key configured and tested
-- [ ] Google Sheets shared with service account
-- [ ] Channels tab populated with target YouTube channels
-- [ ] `.env` file configured with all required values
-- [ ] `npm run build` succeeds without errors
-- [ ] Test run with `npm run dev` shows correct behavior
-- [ ] PM2 configured and running: `pm2 list` shows `content-engine`
-- [ ] PM2 startup configured: `pm2 startup` + `pm2 save`
-- [ ] Log rotation working: check `logs/` directory
-- [ ] Oracle Cloud VM firewall allows outbound HTTPS (port 443)
-- [ ] SSH key permissions set: `chmod 400`
-- [ ] Secrets NOT committed to git (check `.gitignore`)
-- [ ] Dry run tested: `DRY_RUN=true npm run dev`
-- [ ] Duplicate detection tested: run pipeline twice, verify no duplicates
 
 ---
 
@@ -301,38 +220,43 @@ pm2 startup
 
 ```
 Content/
+├── .github/workflows/
+│   └── scraper.yml            # GitHub actions workflow cron
+├── deploy/                    # Setup & server proxy configuration scripts
 ├── src/
-│   ├── index.ts                        # Entry point
-│   ├── config/
-│   │   └── env.ts                      # Environment configuration
-│   ├── services/
-│   │   ├── sheets.service.ts           # Google Sheets CRUD
-│   │   ├── rss.service.ts              # YouTube RSS parser
-│   │   ├── gemini-extract.service.ts   # AI opportunity extraction
-│   │   ├── gemini-content.service.ts   # AI content generation
-│   │   ├── gemini-image.service.ts     # AI image generation
-│   │   └── duplicate.service.ts        # Duplicate detection
-│   ├── pipeline/
-│   │   └── runner.ts                   # Pipeline orchestration
-│   ├── types/
-│   │   └── index.ts                    # TypeScript interfaces
-│   └── utils/
-│       ├── logger.ts                   # Winston structured logging
-│       └── retry.ts                    # Retry with backoff
-├── images/                             # Generated images
-├── logs/                               # Application logs
-├── deploy/
-│   └── setup.sh                        # Oracle Cloud setup script
-├── .env.example                        # Config template
-├── .gitignore
-├── ecosystem.config.js                 # PM2 configuration
+│   ├── config/                # Environment schema loading
+│   ├── pipeline/              # Main orchestration runs
+│   ├── scripts/               # Sheet macros and manual scrapers
+│   ├── services/              # Integrations (Sheets, Discord, Scrapers, Gemini)
+│   ├── types/                 # Typings and Interfaces
+│   └── utils/                 # Logger and safety wrappers
+├── ecosystem.config.cjs       # PM2 settings
 ├── package.json
-├── tsconfig.json
-└── README.md
+└── tsconfig.json
 ```
+
+---
+
+## 🐛 Troubleshooting
+
+* **Missing Required Env Variables**: Ensure you copied `.env.example` to `.env` and populated every variable correctly.
+* **OpenSSL JWT Decode Errors**: Verify your `GOOGLE_PRIVATE_KEY` has quotes around it and literal `\n` characters are properly formatted. The loader contains helper code to parse multiline strings automatically.
+* **Puppeteer Missing Browser on Linux**: Run `npx puppeteer browsers install` on your server to fetch the Chromium binary.
+* **Rate Limits**: If encountering Gemini API errors, configure `GEMINI_RATE_LIMIT_MS` to a higher cooldown (e.g. `2000`).
+
+---
+
+## 🔒 Repository Public Release Safety
+
+Yes! This repository **is safe to make public**.
+Before doing so, ensure:
+- Your active `.env` file remains untracked (verified in `.gitignore`).
+- All active Google Cloud JSON credential files (e.g., `gen-lang-client-*.json`) are not in the repository.
+- General documentation (like this README) uses placeholder variables (e.g., `YOUR_GOOGLE_SHEETS_ID` instead of actual production spreadsheet IDs). This has already been cleaned up in this updated README.
 
 ---
 
 ## 📄 License
 
-MIT
+This project is licensed under the [MIT License](LICENSE).
+
