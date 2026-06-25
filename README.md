@@ -1,4 +1,4 @@
-# 🎓 Opportunity Content Engine (v2.0.0)
+# 🎓 OppFlux: AI-Powered Opportunity Discovery Platform (v2.0.0)
 
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Runtime-Node.js%2020%2B-green.svg)](https://nodejs.org/)
