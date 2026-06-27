@@ -8,8 +8,109 @@ import { createServiceLogger } from '../utils/logger.js';
 import { getPendingOpportunity, deletePendingOpportunity, savePendingOpportunity } from './pending-store.service.js';
 import * as sheetsService from './sheets.service.js';
 import { generateContent } from './gemini-content.service.js';
+import { v4 as uuidv4 } from 'uuid';
+import type { Opportunity, Content, OpportunityStatus, ContentStatus } from '../types/index.js';
 
 const log = createServiceLogger('discord-bot');
+
+function parseOpportunityFromMessage(messageContent: string, messageId: string): { opportunity: Opportunity; content: Content } | null {
+    try {
+        let cleanContent = messageContent;
+        cleanContent = cleanContent.replace(/^✅ \*\*APPROVED & SAVED\*\*\n\n/, '');
+        cleanContent = cleanContent.replace(/^❌ \*\*REJECTED \/ UNAPPROVED\*\*\n\n/, '');
+
+        const lines = cleanContent.split('\n');
+        let name = '';
+        
+        const firstLine = lines[0] || '';
+        const nameMatch = firstLine.match(/^(?:🌐 \*\*\[WEB\] |📋 \*\*)(.*?)\*\*/);
+        if (nameMatch) {
+            name = nameMatch[1].trim();
+        } else {
+            const fallbackNameMatch = firstLine.match(/\*\*(.*?)\*\*/);
+            if (fallbackNameMatch) {
+                name = fallbackNameMatch[1].trim();
+            } else {
+                return null;
+            }
+        }
+
+        const getField = (label: string): string => {
+            const line = lines.find(l => l.includes(label));
+            if (!line) return '';
+            const parts = line.split(label);
+            if (parts.length < 2) return '';
+            return parts[1].trim();
+        };
+
+        const organizer = getField('Organizer:');
+        const location = getField('Location:');
+        const mode = getField('Mode:');
+        const fees = getField('Fees:');
+        const deadline = getField('Deadline:');
+        const eligibility = getField('Eligibility:');
+        const rewards = getField('Rewards:');
+        const registrationLink = getField('Registration:');
+        const sourceVideo = getField('Source:');
+
+        let caption = '';
+        const dividerIndex = cleanContent.indexOf('━━━━━━━━━━━━━━');
+        if (dividerIndex !== -1) {
+            caption = cleanContent.substring(dividerIndex + '━━━━━━━━━━━━━━'.length).trim();
+        }
+
+        const hashtagRegex = /#\w+/g;
+        const foundHashtags = caption.match(hashtagRegex) || [];
+        const hashtags = foundHashtags.join(' ');
+
+        let sourceChannel = 'scraped';
+        if (sourceVideo) {
+            try {
+                const url = new URL(sourceVideo);
+                sourceChannel = url.hostname.replace('www.', '');
+            } catch {
+                sourceChannel = 'scraped';
+            }
+        }
+
+        const opportunityId = uuidv4().replace(/-/g, '').substring(0, 16);
+
+        const opportunity: Opportunity = {
+            id: opportunityId,
+            opportunity_name: name,
+            organizer,
+            registration_link: registrationLink,
+            deadline,
+            eligibility,
+            rewards,
+            mode,
+            location,
+            fees,
+            source_video: sourceVideo,
+            source_channel: sourceChannel,
+            status: 'new' as OpportunityStatus,
+            created_at: new Date().toISOString(),
+        };
+
+        const content: Content = {
+            opportunity_id: opportunityId,
+            caption,
+            hashtags,
+            image_prompt: '',
+            image_url: '',
+            content_status: 'pending_review' as ContentStatus,
+            discord_message_id: messageId,
+            review_status: 'pending',
+            reviewed_at: '',
+            reviewed_by: '',
+        };
+
+        return { opportunity, content };
+    } catch (err) {
+        log.error('Failed parsing opportunity from message content', { error: String(err) });
+        return null;
+    }
+}
 
 export const discordClient = new Client({
     intents: [
@@ -57,6 +158,14 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
     }
 
     const messageId = reaction.message.id;
+
+    // Ignore reactions on messages that are already approved or rejected
+    if (reaction.message.content?.startsWith('✅ **APPROVED & SAVED**') || 
+        reaction.message.content?.startsWith('❌ **REJECTED / UNAPPROVED**')) {
+        log.info('  Message already processed — ignoring reaction');
+        return;
+    }
+
     let pendingData = getPendingOpportunity(messageId);
     
     // If not found in local JSON (because it was scraped on GitHub Actions), fetch from Google Sheets
@@ -71,6 +180,16 @@ discordClient.on('messageReactionAdd', async (reaction, user) => {
             }
         } catch (err) {
             log.error('Error fetching pending data from Sheets', { error: String(err) });
+        }
+    }
+
+    // Fallback: parse opportunity details directly from the Discord message content
+    if (!pendingData && reaction.message.content) {
+        log.info(`Attempting message-parsing fallback for message ${messageId}...`);
+        const parsed = parseOpportunityFromMessage(reaction.message.content, messageId);
+        if (parsed) {
+            log.info(`Successfully parsed opportunity: "${parsed.opportunity.opportunity_name}"`);
+            pendingData = parsed;
         }
     }
     
