@@ -517,7 +517,7 @@ async function scrapeSource(
     log.info('  Extracting event links...');
     const rawLinkData: { href: string; text: string }[] = await page.evaluate(`
       (() => {
-        const NAV_SELECTORS = ['nav', 'header', 'footer', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]', '.navbar', '.nav', '.header', '.footer', '.sidebar', '.menu', '#header', '#footer', '#navbar'];
+       const NAV_SELECTORS = ['nav', 'header', 'footer', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]', '.navbar', '.nav', '.header', '.footer', '.sidebar', '.menu', '#header', '#footer', '#navbar','hp-header', 'hp-footer-v2'];
         function insideNav(el) {
           let cur = el;
           while (cur && cur !== document.body) {
@@ -530,11 +530,26 @@ async function scrapeSource(
         }
         const URL_DENY = /(\\/login|\\/signup|\\/sign-in|\\/sign-up|\\/register\\/user|\\/auth|\\/account|\\/cart|\\/checkout|\\/profile|\\/dashboard|\\/my-account)/i;
         const results = [];
+        function isPastEvent(el) {
+          if (!el) return false;
+          if (el.classList.contains('text-muted')) return true;
+          const btn = el.querySelector('button');
+          if (btn && (btn.textContent.includes('over') || btn.classList.contains('text-muted'))) {
+            return true;
+          }
+          return false;
+        }
         document.querySelectorAll('a[href]').forEach((a) => {
           const href = a.href || '';
           if (!href || !href.startsWith('http')) return;
           if (URL_DENY.test(href)) return;
           if (insideNav(a)) return; // skip nav/header/footer links
+
+          // Skip past/ended events (card container itself or inside one)
+          if (a.classList.contains('eventCardV2') && isPastEvent(a)) return;
+          const parentCard = a.closest('.eventCardV2');
+          if (parentCard && isPastEvent(parentCard)) return;
+
           let title = (a.innerText || '').trim();
           if (!title) {
              const img = a.querySelector('img');
