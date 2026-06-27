@@ -550,6 +550,13 @@ async function scrapeSource(
           const parentCard = a.closest('.eventCardV2');
           if (parentCard && isPastEvent(parentCard)) return;
 
+          // For Unstop, only extract actual hackathon opportunity cards
+          if (href.includes('unstop.com')) {
+            const isListingCard = a.classList.contains('item') || a.closest('.item');
+            const isHackathonLink = href.includes('/hackathons/');
+            if (!isListingCard || !isHackathonLink) return;
+          }
+
           let title = (a.innerText || '').trim();
           if (!title) {
              const img = a.querySelector('img');
