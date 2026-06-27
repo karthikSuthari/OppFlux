@@ -6,10 +6,10 @@
 import puppeteer from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import Groq from 'groq-sdk';
 import { config } from '../config/env.js';
 import { createServiceLogger } from '../utils/logger.js';
+import { withRetry } from '../utils/retry.js';
 import * as sheetsService from '../services/sheets.service.js';
 import type { GeminiExtraction, ScrapingSource } from '../types/index.js';
 
@@ -207,28 +207,61 @@ function recordFailedLink(
 
 // ── Groq extraction ──
 
-async function extractFromWebpage(text: string, sourceUrl: string): Promise<GeminiExtraction | null> {
+/**
+ * Parse JSON from a Groq response, tolerating markdown code fences and extra text.
+ * Mirrors the robust parser used by the YouTube pipeline.
+ */
+function parseExtractionJson<T>(text: string): T | null {
   try {
-    const userPrompt = `TODAY'S DATE: ${new Date().toDateString()}\n\nWEBPAGE URL: ${sourceUrl}\n\nWEBPAGE TEXT:\n${text.substring(0, 15000)}\n\nAnalyze this webpage and extract opportunity information.`;
+    return JSON.parse(text) as T;
+  } catch {
+    // continue to fallback
+  }
+  const codeBlock = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (codeBlock) {
+    try {
+      return JSON.parse(codeBlock[1].trim()) as T;
+    } catch {
+      // continue
+    }
+  }
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]) as T;
+    } catch {
+      // final fallback
+    }
+  }
+  return null;
+}
 
-    const response = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.1,
-      messages: [{ role: 'user', content: EXTRACTION_PROMPT + '\n\n' + userPrompt }],
-    });
+async function extractFromWebpage(text: string, sourceUrl: string): Promise<GeminiExtraction | null> {
+  const userPrompt = `TODAY'S DATE: ${new Date().toDateString()}\n\nWEBPAGE URL: ${sourceUrl}\n\nWEBPAGE TEXT:\n${text.substring(0, 15000)}\n\nAnalyze this webpage and extract opportunity information.`;
 
-    let content = response.choices?.[0]?.message?.content?.trim();
+  try {
+    const response = await withRetry(
+      () => groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.1,
+        messages: [{ role: 'user', content: EXTRACTION_PROMPT + '\n\n' + userPrompt }],
+      }),
+      { operationName: 'web-scraper.extract', maxRetries: 2 }
+    );
+
+    const content = response.choices?.[0]?.message?.content?.trim();
     if (!content) return null;
 
-    // Clean up markdown code blocks if Groq adds them
-    content = content.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    const parsed = JSON.parse(content) as GeminiExtraction;
+    const parsed = parseExtractionJson<GeminiExtraction>(content);
+    if (!parsed) {
+      log.warn('Failed to parse Groq extraction response', { sourceUrl, raw: content.substring(0, 300) });
+    }
     return parsed;
   } catch (e) {
+    // Re-throw so the caller can record this as a RETRYABLE failure (not "permanently visited")
     const errMsg = e instanceof Error ? e.message : String(e);
-    log.error('Groq extraction error', { error: errMsg });
-    return null;
+    log.error('Groq extraction error', { sourceUrl, error: errMsg });
+    throw e;
   }
 }
 
@@ -339,19 +372,22 @@ async function expandAllContent(page: import('puppeteer').Page): Promise<void> {
     // Step 2: Try clicking a "Load More" button
     let clicked = false;
 
+    // Shared visibility check — the element is passed as the first argument
+    // (Puppeteer does NOT bind it to `this`, so the old string IIFE using `this` was broken)
+    const isVisible = async (el: import('puppeteer').ElementHandle): Promise<boolean> => {
+      return el.evaluate((node: any) => {
+        const rect = node.getBoundingClientRect();
+        const style = node.ownerDocument.defaultView.getComputedStyle(node);
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      });
+    };
+
     // Try XPath selectors (case-insensitive text match)
     for (const xpath of loadMoreXPaths) {
       try {
         const btn = await page.waitForSelector(`::-p-xpath(${xpath})`, { timeout: 500 });
         if (btn) {
-          const isVisible = await btn.evaluate(`
-            (() => {
-              const rect = this.getBoundingClientRect();
-              const style = window.getComputedStyle(this);
-              return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-            })()
-          `) as boolean;
-          if (isVisible) {
+          if (await isVisible(btn)) {
             await btn.click();
             clicked = true;
             log.info(`  📄 Clicked "Load More" button (round ${round + 1})`);
@@ -370,14 +406,7 @@ async function expandAllContent(page: import('puppeteer').Page): Promise<void> {
         try {
           const btn = await page.$(selector);
           if (btn) {
-            const isVisible = await btn.evaluate(`
-              (() => {
-                const rect = this.getBoundingClientRect();
-                const style = window.getComputedStyle(this);
-                return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-              })()
-            `) as boolean;
-            if (isVisible) {
+            if (await isVisible(btn)) {
               await btn.click();
               clicked = true;
               log.info(`  📄 Clicked load-more element (round ${round + 1})`);
@@ -483,20 +512,35 @@ async function scrapeSource(
     await expandAllContent(page);
 
     // 2. Extract all links from the fully-expanded page
+    //    Exclude navigation/header/footer/sidebar links — only keep links inside
+    //    the main content area. Also drop login/signup/account/auth URLs.
     log.info('  Extracting event links...');
     const rawLinkData: { href: string; text: string }[] = await page.evaluate(`
       (() => {
+        const NAV_SELECTORS = ['nav', 'header', 'footer', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]', '.navbar', '.nav', '.header', '.footer', '.sidebar', '.menu', '#header', '#footer', '#navbar'];
+        function insideNav(el) {
+          let cur = el;
+          while (cur && cur !== document.body) {
+            if (cur.matches && NAV_SELECTORS.some((sel) => cur.matches(sel) || cur.closest(sel))) {
+              return true;
+            }
+            cur = cur.parentElement;
+          }
+          return false;
+        }
+        const URL_DENY = /(\\/login|\\/signup|\\/sign-in|\\/sign-up|\\/register\\/user|\\/auth|\\/account|\\/cart|\\/checkout|\\/profile|\\/dashboard|\\/my-account)/i;
         const results = [];
         document.querySelectorAll('a[href]').forEach((a) => {
-          let title = a.innerText.trim();
+          const href = a.href || '';
+          if (!href || !href.startsWith('http')) return;
+          if (URL_DENY.test(href)) return;
+          if (insideNav(a)) return; // skip nav/header/footer links
+          let title = (a.innerText || '').trim();
           if (!title) {
              const img = a.querySelector('img');
              title = img ? (img.alt || 'Image Link') : 'Card Link';
           }
-          const href = a.href;
-          if (href && href.startsWith('http') && !href.includes('login') && !href.includes('signup')) {
-            results.push({ href, text: title });
-          }
+          results.push({ href, text: title });
         });
         return results;
       })()
@@ -584,12 +628,19 @@ async function scrapeSource(
           log.info(`    🗑️ Rejected: ${reason}`);
         }
 
-        // Successfully processed — mark visited and remove from failed if present
+        // Successfully analyzed (valid OR rejected) — mark visited and clear failure
         visitedLinks.set(eventUrl, Date.now());
         failedLinks.delete(eventUrl);
         saveVisitedLinks(visitedLinks);
       } catch (linkErr) {
         const errMsg = linkErr instanceof Error ? linkErr.message : String(linkErr);
+        // Quota exhausted: stop scraping this run entirely (no point retrying per-link)
+        if (errMsg.includes('429') || errMsg.includes('rate_limit_exceeded')) {
+          log.warn('    🚫 Groq quota exhausted — stopping scraper for this run');
+          recordFailedLink(failedLinks, eventUrl);
+          saveFailedLinks(failedLinks);
+          break;
+        }
         log.warn(`    ❌ Failed: ${errMsg}`);
         // Track failure for retry instead of permanently marking as visited
         recordFailedLink(failedLinks, eventUrl);

@@ -4,6 +4,7 @@
 
 import { createServiceLogger } from '../utils/logger.js';
 import * as sheetsService from './sheets.service.js';
+import { getAllPendingOpportunities } from './pending-store.service.js';
 import type { VideoEntry, GeminiExtraction, DuplicateCheckResult, Opportunity } from '../types/index.js';
 
 const log = createServiceLogger('duplicate');
@@ -16,8 +17,64 @@ let cacheTimestamp = 0;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
+ * Normalize a URL/registration link for comparison so that trivial differences
+ * (trailing slash, http vs https, www, tracking query params, fragments) don't
+ * let the same opportunity slip past duplicate detection.
+ */
+function normalizeUrl(url: string): string {
+  if (!url) return '';
+  let u = url.trim().toLowerCase();
+  // Strip protocol
+  u = u.replace(/^https?:\/\//, '');
+  // Strip leading www.
+  u = u.replace(/^www\./, '');
+  // Drop fragment
+  u = u.split('#')[0];
+  // Remove common tracking query params
+  try {
+    const [path, query = ''] = u.split('?');
+    if (query) {
+      const tracking = ['ref', 'ref_src', 'ref_url', 'utm_source', 'utm_medium',
+        'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid', 'source', 'mc_eid'];
+      const kept = query
+        .split('&')
+        .filter((kv) => {
+          const key = kv.split('=')[0];
+          return key && !tracking.includes(key);
+        });
+      u = kept.length ? `${path}?${kept.join('&')}` : path;
+    }
+    // Collapse trailing slash
+    if (u.endsWith('/')) u = u.slice(0, -1);
+  } catch {
+    // If anything goes wrong, return the simple-stripped form
+  }
+  return u;
+}
+
+/**
+ * Normalize an opportunity name for fuzzy comparison.
+ * Removes year tokens (2023-2030) so that "Hackathon 2024" and "Hackathon 2025"
+ * are NOT falsely flagged as duplicates, while keeping the rest of the name.
+ */
+function normalizeName(name: string): string {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/\b(19|20)\d{2}\b/g, '') // strip 4-digit years
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Get existing opportunities, using an in-memory cache to avoid
  * hammering the Google Sheets API on every duplicate check.
+ *
+ * The cache merges two sources so that an opportunity is never re-processed
+ * while it is still in flight:
+ *   1. Google Sheets — committed/approved/rejected opportunities
+ *   2. Local pending store — opportunities sent to Discord but not yet reacted to
  * Cache is invalidated after 5 minutes or when explicitly cleared.
  */
 async function getCachedOpportunities(): Promise<Opportunity[]> {
@@ -26,8 +83,10 @@ async function getCachedOpportunities(): Promise<Opportunity[]> {
     return cachedOpportunities;
   }
 
-  log.debug('Refreshing opportunities cache from Google Sheets');
-  cachedOpportunities = await sheetsService.getExistingOpportunities();
+  log.debug('Refreshing opportunities cache from Google Sheets + pending store');
+  const fromSheets = await sheetsService.getExistingOpportunities();
+  const pending = getAllPendingOpportunities();
+  cachedOpportunities = [...fromSheets, ...pending];
   cacheTimestamp = now;
   return cachedOpportunities;
 }
@@ -138,10 +197,11 @@ export async function checkDuplicate(
       return NOT_DUPLICATE;
     }
 
-    // Layer 2: Registration link check
+    // Layer 2: Registration link check (normalized — ignores tracking params, scheme, www, trailing slash)
     if (extraction.registration_link && extraction.registration_link !== 'Not specified') {
+      const normNew = normalizeUrl(extraction.registration_link);
       const linkMatch = existingOpportunities.find(
-        (opp) => opp.registration_link === extraction.registration_link
+        (opp) => normalizeUrl(opp.registration_link) === normNew
       );
       if (linkMatch) {
         log.info(`Duplicate: Registration link matches existing opportunity "${linkMatch.opportunity_name}"`);
@@ -153,11 +213,12 @@ export async function checkDuplicate(
       }
     }
 
-    // Layer 3: Fuzzy name matching
+    // Layer 3: Fuzzy name matching (year-stripped so cohort years don't false-positive)
     if (extraction.opportunity_name) {
       const SIMILARITY_THRESHOLD = 0.85; // 85% similarity = likely duplicate
+      const normNewName = normalizeName(extraction.opportunity_name);
       for (const opp of existingOpportunities) {
-        const sim = similarity(extraction.opportunity_name, opp.opportunity_name);
+        const sim = similarity(normNewName, normalizeName(opp.opportunity_name));
         if (sim >= SIMILARITY_THRESHOLD) {
           log.info(
             `Duplicate: Name "${extraction.opportunity_name}" similar to "${opp.opportunity_name}" (${(sim * 100).toFixed(1)}% match)`
@@ -201,9 +262,10 @@ export async function checkScrapedDuplicate(
       return NOT_DUPLICATE;
     }
 
-    // Check source URL match
+    // Check source URL match (normalized)
+    const normSourceUrl = normalizeUrl(sourceUrl);
     const urlMatch = existingOpportunities.find(
-      (opp) => opp.source_video === sourceUrl
+      (opp) => normalizeUrl(opp.source_video) === normSourceUrl
     );
     if (urlMatch) {
       log.info(`Duplicate: Source URL already processed as "${urlMatch.opportunity_name}"`);
@@ -214,10 +276,11 @@ export async function checkScrapedDuplicate(
       };
     }
 
-    // Registration link check
+    // Registration link check (normalized)
     if (extraction.registration_link && extraction.registration_link !== 'Not specified') {
+      const normNew = normalizeUrl(extraction.registration_link);
       const linkMatch = existingOpportunities.find(
-        (opp) => opp.registration_link === extraction.registration_link
+        (opp) => normalizeUrl(opp.registration_link) === normNew
       );
       if (linkMatch) {
         log.info(`Duplicate: Registration link matches existing "${linkMatch.opportunity_name}"`);
@@ -229,11 +292,12 @@ export async function checkScrapedDuplicate(
       }
     }
 
-    // Fuzzy name matching
+    // Fuzzy name matching (year-stripped)
     if (extraction.opportunity_name) {
       const SIMILARITY_THRESHOLD = 0.85;
+      const normNewName = normalizeName(extraction.opportunity_name);
       for (const opp of existingOpportunities) {
-        const sim = similarity(extraction.opportunity_name, opp.opportunity_name);
+        const sim = similarity(normNewName, normalizeName(opp.opportunity_name));
         if (sim >= SIMILARITY_THRESHOLD) {
           log.info(
             `Duplicate: Name "${extraction.opportunity_name}" similar to "${opp.opportunity_name}" (${(sim * 100).toFixed(1)}% match)`

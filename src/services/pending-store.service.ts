@@ -55,6 +55,16 @@ export function getPendingOpportunity(messageId: string): { opportunity: Opportu
   return store[messageId] || null;
 }
 
+/**
+ * Get ALL pending (sent-to-Discord-but-not-yet-reacted) opportunities.
+ * Used for duplicate detection so the same opportunity is not re-processed
+ * while it is still awaiting review.
+ */
+export function getAllPendingOpportunities(): Opportunity[] {
+  const store = readStore();
+  return Object.values(store).map((entry) => entry.opportunity);
+}
+
 export function deletePendingOpportunity(messageId: string): void {
   const store = readStore();
   if (store[messageId]) {

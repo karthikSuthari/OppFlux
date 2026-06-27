@@ -234,7 +234,7 @@ export async function addContent(content: Content): Promise<void> {
       image_prompt: content.image_prompt,
       image_url: content.image_url,
       content_status: content.content_status,
-      telegram_message_id: content.discord_message_id || '',
+      telegram_message_id: content.discord_message_id ? `'${content.discord_message_id}` : '',
       review_status: content.review_status || 'pending',
       reviewed_at: content.reviewed_at || '',
       reviewed_by: content.reviewed_by || '',
@@ -294,7 +294,7 @@ export async function getContentByOpportunityId(opportunityId: string): Promise<
     image_prompt: row.get('image_prompt') || '',
     image_url: row.get('image_url') || '',
     content_status: row.get('content_status') || 'draft',
-    discord_message_id: row.get('telegram_message_id') || '',
+    discord_message_id: String(row.get('telegram_message_id') || '').replace(/^'/, ''),
     review_status: row.get('review_status') || '',
     reviewed_at: row.get('reviewed_at') || '',
     reviewed_by: row.get('reviewed_by') || '',
@@ -311,7 +311,11 @@ export async function getContentByDiscordMessageId(messageId: string): Promise<C
   if (!sheet) throw new Error(`Tab "${TABS.CONTENT}" not found`);
 
   const rows = await sheet.getRows();
-  const row = rows.find((r: GoogleSpreadsheetRow) => r.get('telegram_message_id') === messageId);
+  const row = rows.find((r: GoogleSpreadsheetRow) => {
+    const val = r.get('telegram_message_id');
+    if (!val) return false;
+    return String(val).replace(/^'/, '').trim() === String(messageId).trim();
+  });
 
   if (!row) return null;
 
@@ -322,7 +326,7 @@ export async function getContentByDiscordMessageId(messageId: string): Promise<C
     image_prompt: row.get('image_prompt') || '',
     image_url: row.get('image_url') || '',
     content_status: row.get('content_status') || 'draft',
-    discord_message_id: row.get('telegram_message_id') || '',
+    discord_message_id: String(row.get('telegram_message_id') || '').replace(/^'/, ''),
     review_status: row.get('review_status') || '',
     reviewed_at: row.get('reviewed_at') || '',
     reviewed_by: row.get('reviewed_by') || '',
@@ -427,7 +431,7 @@ export async function updateContentDiscordMessageId(
   const row = rows.find((r: GoogleSpreadsheetRow) => r.get('opportunity_id') === opportunityId);
 
   if (row) {
-    row.set('telegram_message_id', discordMessageId);
+    row.set('telegram_message_id', `'${discordMessageId}`);
     await row.save();
     log.debug(`Updated discord_message_id for ${opportunityId}: ${discordMessageId}`);
   }

@@ -10,8 +10,6 @@ import * as sheetsService from '../services/sheets.service.js';
 import { fetchChannelFeed } from '../services/rss.service.js';
 import { extractOpportunity } from '../services/gemini-extract.service.js';
 import { generateContent } from '../services/gemini-content.service.js';
-import { generateImageLocal } from '../services/gemini-image.service.js';
-import { uploadImage } from '../services/cloud-storage.service.js';
 import { checkDuplicate, checkScrapedDuplicate, clearCache, addToCache } from '../services/duplicate.service.js';
 import { sendDiscordMessage, sendDiscordReviewMessage } from '../services/discord.service.js';
 import { savePendingOpportunity } from '../services/pending-store.service.js';
@@ -277,9 +275,13 @@ async function processChannel(
   }
 
   // Process each video
+  let quotaExhausted = false;
   for (const video of videos) {
     try {
-      await processVideo(video, summary);
+      const status = await processVideo(video, summary);
+      if (status === 'quota_exhausted') {
+        quotaExhausted = true;
+      }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       log.error(`Video processing failed: "${video.title}"`, {
@@ -290,6 +292,12 @@ async function processChannel(
       summary.errorDetails.push(`Video "${video.title}": ${errMsg}`);
     }
 
+    // Stop immediately if Groq quota is exhausted — no point burning more calls
+    if (quotaExhausted) {
+      log.warn('🚫 Stopping channel processing: Groq quota exhausted');
+      break;
+    }
+
     // Rate limiting between videos
     await sleep(config.geminiRateLimitMs);
   }
@@ -298,11 +306,13 @@ async function processChannel(
 /**
  * Process a single video through the full pipeline:
  * Duplicate check → Extract → Content → Image → Save → Discord review
+ *
+ * Returns a status so the caller can react to quota exhaustion by stopping the run.
  */
 async function processVideo(
   video: VideoEntry,
   summary: PipelineRunSummary
-): Promise<void> {
+): Promise<'ok' | 'quota_exhausted'> {
   log.info(`\n  📹 Processing: "${video.title}"`);
   log.debug('Video details', {
     videoId: video.videoId,
@@ -314,7 +324,7 @@ async function processVideo(
   summary.videosProcessed++;
   if (shouldSkipVideo(video)) {
     summary.nonOpportunitiesSkipped++;
-    return;
+    return 'ok';
   }
 
   // ── Step A: Pre-extraction duplicate check (Video ID) ──
@@ -322,7 +332,7 @@ async function processVideo(
   if (preCheck.isDuplicate) {
     log.info(`  ⏭️ Skipping (duplicate): ${preCheck.reason}`);
     summary.duplicatesSkipped++;
-    return;
+    return 'ok';
   }
 
   // ── Step B: Extract opportunity data via Groq ──
@@ -356,7 +366,8 @@ async function processVideo(
 
       summary.nonOpportunitiesSkipped++;
 
-      return;
+      return 'quota_exhausted';
+
     }
 
 
@@ -374,7 +385,7 @@ async function processVideo(
 
     summary.nonOpportunitiesSkipped++;
 
-    return;
+    return 'ok';
 
   }
 
@@ -384,7 +395,7 @@ async function processVideo(
   if (postCheck.isDuplicate) {
     log.info(`  ⏭️ Skipping (duplicate): ${postCheck.reason}`);
     summary.duplicatesSkipped++;
-    return;
+    return 'ok';
   }
 
   // ── Step D: Save opportunity to Sheets ──
@@ -419,25 +430,13 @@ async function processVideo(
 
   if (!contentResult) {
     log.warn('  ⚠️ Content generation failed — opportunity saved without content');
-    return;
+    return 'ok';
   }
   summary.contentGenerated++;
 
-  // ── Step F: Generate image via Gemini + upload to cloud ──
-  log.info('  🎨 Generating image...');
-  await sleep(config.geminiRateLimitMs);
-
-  // Generate local image first
-  const localImagePath = await generateImageLocal(contentResult.image_prompt, opportunityId);
-  let cloudImageUrl = '';
-
-  if (localImagePath) {
-    summary.imagesGenerated++;
-    // Upload to Google Drive cloud storage
-    const fileName = `opp_${opportunityId}_${Date.now()}.png`;
-    cloudImageUrl = await uploadImage(localImagePath, fileName);
-    log.info(`  ☁️ Image uploaded to cloud: ${cloudImageUrl}`);
-  }
+  // ── Step F: Skip image generation ──
+  log.info('  🎨 Image generation model disabled/removed');
+  const cloudImageUrl = '';
 
   // ── Step G: Initialize content for Sheets ──
   const hashtags = contentResult.hashtags.map((h) => `#${h}`).join(' ');
@@ -465,6 +464,7 @@ async function processVideo(
       );
 
       if (messageId) {
+        content.discord_message_id = messageId;
         savePendingOpportunity(messageId, opportunity, content);
         summary.discordSent++;
         log.info('  📢 Discord review message sent, awaiting reaction');
@@ -477,7 +477,10 @@ async function processVideo(
   }
 
   log.info(`  ✅ Successfully processed: "${opportunity.opportunity_name}"`);
+  // An opportunity was created and queued for review — count it
+  summary.opportunitiesCreated++;
   addToCache(opportunity);
+  return 'ok';
 }
 
 /**
@@ -553,7 +556,9 @@ export async function processScrapedOpportunity(
     reviewed_by: '',
   };
 
-  // ── Step F: Send to Discord for review ──
+  // ── Step F: Send to Discord for review (NO Sheets write yet) ──
+  // Same flow as YouTube: the opportunity lives only in the local pending store
+  // until a reviewer reacts ✅ (which then writes it to Sheets).
   if (!config.dryRun) {
     log.info('  📢 Sending to Discord for review...');
     try {
@@ -562,18 +567,12 @@ export async function processScrapedOpportunity(
       );
 
       if (messageId) {
-        // Immediately save to Sheets as pending so the Oracle server can find it
-        opportunity.status = 'pending_review';
         content.discord_message_id = messageId;
-        content.content_status = 'pending_review';
-        
-        await sheetsService.addOpportunity(opportunity);
-        await sheetsService.addContent(content);
-        
-        // Save locally just in case
+        // Save locally so the Discord bot can find it on reaction,
+        // and so duplicate detection sees it as "pending".
         savePendingOpportunity(messageId, opportunity, content);
         summary.discordSent++;
-        log.info('  📢 Discord review message sent & saved to Sheets as pending');
+        log.info('  📢 Discord review message sent, awaiting reaction');
       } else {
         log.warn('  ⚠️ Failed to send Discord review message');
       }
